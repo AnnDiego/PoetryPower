@@ -2,10 +2,10 @@
 
 Welcome to my poetic tribute to SpaceX’s Starship Flight Test 10 (NET August 24, 2025)! As an aspiring Chief Poet for SpaceX, I’ve crafted a cosmic ode to Starship’s mighty thrust and Mars-bound ambition. But there’s a twist—a hidden, cheeky poem and a visual prompt lie within, waiting to be unlocked. Solve the riddle, crack the code, and reveal the saucy secret!
 
-##The Poem
+## The Poem
 The poem lives in poem.txt. Read it for a taste of Starship’s grandeur. Feeling curious? There’s more to discover!
 
-##The Riddle
+## The Riddle
 What powers Starship’s thrust with 33 Raptor engines? The key phrase is the answer (+33) in all caps to unlock the hidden vibes!
 
 ## How to Play
@@ -30,6 +30,6 @@ What powers Starship’s thrust with 33 Raptor engines? The key phrase is the an
 5. Run: `python decoder.py` (use `--view` options as above).
 6. Deactivate: `deactivate`
 
-##Chief Poet Vision
+## Chief Poet Vision
 This puzzle is part of my quest to become SpaceX’s Chief Poet, blending tech, poetry, and cosmic dreams. Check out the main README.md in the repo root for my full pitch to inspire humanity’s journey to the stars!
 Join the fun, share your solve (no spoilers!) on X with #ChiefPoetSpaceX, and tag @AnnDiegoUSA and @SpaceX. Let’s celebrate Starship’s flight! 🚀😘
