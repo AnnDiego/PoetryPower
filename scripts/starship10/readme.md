@@ -1,4 +1,4 @@
-#Starship Flight Test 10 Poem Puzzle
+# Starship Flight Test 10 Poem Puzzle
 
 Welcome to my poetic tribute to SpaceX’s Starship Flight Test 10 (NET August 24, 2025)! As an aspiring Chief Poet for SpaceX, I’ve crafted a cosmic ode to Starship’s mighty thrust and Mars-bound ambition. But there’s a twist—a hidden, cheeky poem and a visual prompt lie within, waiting to be unlocked. Solve the riddle, crack the code, and reveal the saucy secret!
 
