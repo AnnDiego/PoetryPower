@@ -28,4 +28,4 @@ Let’s Make It Happen
 SpaceX, you’ve redefined what’s possible—now let’s create the Chief Poet role to celebrate your missions with words that inspire the world. Check out my poems, run the code, and let’s dream up a future where poetry and rockets launch together. Reach out on X @AnnDiegoUSA to talk verse, vibes, and the stars.
 To the cosmos, we ignite
 
-Ann Adamson, Aspiring Chief Poet
+Ann Adamson, Aspiring *Honorary* Chief Poet
