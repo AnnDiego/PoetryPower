@@ -1,0 +1,9 @@
+source starship10_venv/bin/activate
+
+in VSCode command shife P
+Python: Select Interpreter 
+choose venv
+
+if in devug TERMINAL
+>>>> 
+use exit() to return to terminal/command prompt.
