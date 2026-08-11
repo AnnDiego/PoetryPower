@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # ChiefPoetSpaceX
 
 Chief Poet's Cosmic Verse
@@ -29,3 +30,7 @@ SpaceX, you’ve redefined what’s possible—now let’s create the Chief Poet
 To the cosmos, we ignite
 
 Ann Adamson, Aspiring *Honorary* Chief Poet
+=======
+# PoetryPower
+Repo for automations and tools for my poetry practice 
+>>>>>>> 424adbf871483b8785e96f72b4943b52cecba0f9

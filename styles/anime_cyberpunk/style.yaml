@@ -1,0 +1,15 @@
+name: anime_cyberpunk
+display_name: Anime Cyberpunk
+vibe: Romantic nighttime adult anime figures with pops of neon color, slight cyberpunk edge, urban street market energy.
+base_prompt: |
+  Romantic nighttime anime style with subtle cyberpunk influence. 
+  Neon accents, urban night atmosphere, street market or alley energy, soft rain or atmospheric haze optional. 
+  Adult characters, emotional intensity mixed with neon glow.
+  
+  Subject and scene: {poem_summary}
+  Mood: {mood}
+notes: Perfect for modern love poems with edge, nighttime longing, city energy, or passionate moments.
+examples:
+  - id: neon_tokyo_embrace
+    type: text_to_image
+    prompt: "A passionate embrace in a neon-lit Tokyo alley, with sakura petals and a whisky bottle, in a moody cyberpunk style."

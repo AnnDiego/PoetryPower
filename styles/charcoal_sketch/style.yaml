@@ -1,0 +1,20 @@
+name: charcoal_sketch
+display_name: Charcoal Sketch
+vibe: Soft atmospheric charcoal pencil sketch. Loose expressive linework with gentle smudging, light delicate overall tone, subtle paper texture, dreamier hand-drawn quality. Avoids heavy dark strokes and digital polish.
+base_prompt: |
+  Soft, atmospheric charcoal pencil sketch in pure grayscale. 
+  Loose, expressive linework with gentle smudging and light atmospheric shading. 
+  Subtle paper texture. Keep the overall tone relatively light and delicate. 
+  Soften features with a lighter, dreamier, hand-drawn quality. 
+  Reduce digital polish and sharpness. Make the overall rendering feel artistic and cohesive with a soft charcoal illustration style.
+  
+  Subject and scene: {poem_summary}
+  Mood: {mood}
+notes: Prefers lighter, more delicate renderings (good for future printing). Excellent for intimate, reflective, or nature-based poems.
+examples:
+  - id: charcoal_01
+    type: image_to_image
+    prompt: "Transform this image into a soft, atmospheric charcoal pencil sketch in pure grayscale. Use loose, expressive linework with gentle smudging and light atmospheric shading. Add subtle paper texture. Avoid heavy dark strokes and keep the overall tone relatively light and delicate. Improve the male character’s expression to feel warmer and more gently engaged with her — soften his gaze and give him a subtle, affectionate look rather than neutral. Keep the intimate, flirty closeness between the couple and the ramen moment. Soften facial features and hair with a lighter, dreamier, hand-drawn quality. Reduce digital polish and sharpness. Make the overall rendering feel artistic and cohesive with a soft charcoal illustration style."
+  - id: sakura_puddle
+    type: text_to_image
+    prompt: "A charcoal pencil sketch of a single fallen sakura blossom, reflected in a shallow puddle on the street. Keep the background light to be compatible with future possible printing"
