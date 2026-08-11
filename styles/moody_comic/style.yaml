@@ -1,0 +1,18 @@
+name: moody_comic
+display_name: Moody Comic
+vibe: Dark and moody, slightly anime-inspired comic style with minimal color variation, strong dramatic highlights, and noir atmosphere.
+base_prompt: |
+  Moody comic-inspired style with slight anime influence. 
+  Dark atmosphere, minimal color palette, dramatic lighting and highlights, strong emotional tension. 
+  Clean but expressive linework, cinematic framing.
+  
+  Subject and scene: {poem_summary}
+  Mood: {mood}
+notes: Great for bittersweet, introspective, nighttime, or emotionally charged poems.
+examples:
+  - id: moody_phone
+    type: text_to_image
+    prompt: "A young man on a bed in the dark, looking at a phone with a woman's image, in a moody, comic-inspired style."
+  - id: moody_noir_stars
+    type: text_to_image
+    prompt: "A comic book panel of a man and woman in a bittersweet, noir-inspired scene with starry background."

@@ -1,0 +1,15 @@
+name: artistic_collage
+display_name: Artistic Collage
+vibe: Artful collage made of colorful virtual paper or fabric bits and strips, words or pages, pen/pencil strokes or strings that bind everything together. Symbolic, layered, and unified.
+base_prompt: |
+  Beautiful artistic collage style. 
+  Composed of colorful virtual paper and fabric bits, strips of handwritten or printed words and poetry pages, pen and pencil strokes, and subtle strings or threads that bind the elements together into a cohesive whole.
+  Elegant, layered, symbolic, and hopeful atmosphere.
+  
+  Subject and scene: {poem_summary}
+  Mood: {mood}
+notes: Excellent for themes of transformation, reinvention, identity, and becoming.
+examples:
+  - id: collage_poet_becoming
+    type: text_to_image
+    prompt: "A beautiful woman made of flowing handwritten poetry, her body transforming from dark corporate silhouette into vibrant, colorful words and verses, symbolic of reinvention and becoming a full-time poet, elegant and hopeful atmosphere, artistic collage style"

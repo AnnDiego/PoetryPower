@@ -209,3 +209,4 @@ __marimo__/
 scripts/.DS_Store
 scripts/starship10_venv/
 scripts/private/
+*.pyc

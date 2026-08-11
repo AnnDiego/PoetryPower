@@ -1,0 +1,19 @@
+name: romantic_anime
+display_name: Romantic Anime
+vibe: Soft, romantic adult anime style with a gentle Japanese color palette, often featuring sakura blossoms. Warm, intimate, and emotionally tender.
+base_prompt: |
+  Soft romantic anime style with adult characters. 
+  Gentle Japanese color palette, warm lighting, delicate details, soft shading. 
+  Often includes sakura blossoms or soft natural elements. 
+  Intimate, tender, and emotionally rich atmosphere.
+  
+  Subject and scene: {poem_summary}
+  Mood: {mood}
+notes: Ideal for love poems, quiet intimacy, longing, and soft emotional moments.
+examples:
+  - id: ramen_romance
+    type: text_to_image
+    prompt: "A young man and woman share a romantic moment in a cozy ramen shop, with soft anime-inspired warmth."
+  - id: sakura_emerald
+    type: text_to_image
+    prompt: "A cute young woman in anime style, with sleek dark hair in a loose bun sprinkled with delicate sakura petals, wearing a demure tightly buttoned emerald-green dress with subtle floral embroidery, standing under a sakura tree in full bloom. Dark, brooding skies loom over, adding a sense of intimacy. She is with her lover, a mysterious man with piercing eyes, dressed in a dark suit with a crimson tie"
