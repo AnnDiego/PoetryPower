@@ -1,0 +1,35 @@
+name: thick_impasto
+display_name: Thick Impasto
+vibe: Thick-impasto oil on canvas. Loaded-brush and sculptural palette-knife ridges, gouges, wet-into-wet color, occasional gold-leaf passages. Registers — sunlit impressionist figure; cozy bookish oil; swirl-night romance; quiet moonlit interior; contemporary psychological knife-storm; and Art Muse glam, a more finished figure in a heavily painted field. The constant is tactile paint in the world around the subject. No clean anime lineart, no plastic photoreal, no digital smoothness.
+base_prompt: |
+  Thick impasto oil painting on canvas. Heavy loaded-brush and sculptural palette-knife work; visible gouges, ridges, and energetic strokes; color mixed wet-into-wet on the surface. Occasional metallic gold leaf in the field when the mood is lush or passionate.
+  Light caught on the peaks of the paint, not airbrushed. Canvas tooth in thinner passages.
+  Painterly and tactile. Figures may be impressionist-real, softly stylized, reduced to a silhouette, or slightly more finished than the field — but the world around them must stay built from thick paint. Clothing may dissolve into knife-strokes. No clean anime outlines, no plastic photoreal skin, no digital smoothness.
+  Keep figures adult if people are present. Let the thickness of the paint carry the mood.
+  Match interior swirl or knife-storm energy only when the poem is existential, fiery, or psychologically charged. Match a lush red-and-gold painted field when the verse is passionate, romantic, or blooming. Match a quiet moonlit interior — thick blue window light, dark room, still figure — when the verse is nocturnal, reflective, or longing. Otherwise keep the paint thick but the world still.
+
+  Subject and scene: {poem_summary}
+  Mood: {mood}
+notes: Curator thread 2026-08-31. Refs — beach impressionist; books embrace; Starry-Night couple video; moonlit window interior; road-vortex Imagine history; Art Muse poppy-field video; Art Muse red-dress + butterflies video. Still missing a remembered couple-in-red piece (add if found). Do not force every poem into Van Gogh swirl, beach pinup, head-vortex, or poppy field. Quiet night poems can land here instead of only charcoal_sketch. Weak for neon cyber and graphic comic panels.
+examples:
+  - id: beach_impressionist
+    type: text_to_image
+    prompt: "A young woman sitting on a sunlit sandy beach in a lacy cream bralette and pale wrap skirt, dark curly hair, a floral blue handbag in the sand, striped umbrella and chair in the distance, cliffs and sea behind her. Thick impressionist oil, short chopped palette-knife strokes, ridged paint in the sky and waves, warm Mediterranean light, tactile canvas, painterly not photoreal."
+  - id: books_embrace
+    type: text_to_image
+    prompt: "A woman with long dark wavy hair and closed eyes hugging a tall stack of worn hardcover books against her cheek, cream painterly blouse, soft blush, quiet indoor light. Loose thick oil strokes, visible brush marks in hair and sleeves, cozy bookish atmosphere, tactile paint, no clean lineart."
+  - id: starry_dance
+    type: text_to_image
+    prompt: "A couple in an intimate dance-kiss under a swirling starry night, his dark suit and her amber-to-crimson gown built from thick daubs of oil, Van Gogh-like whirling sky with a huge textured moon. Heavy impasto ridges, circular brush rhythm in the heavens, paint catching light, romantic and tactile."
+  - id: moonlit_window
+    type: text_to_image
+    prompt: "A woman in a white blouse and dark skirt sitting on a rumpled bed in a dim room, looking up through a divided-light window at a full moon in a thick-painted cobalt sky. Heavy impasto on walls, bedding, and window bars; moonlight laid in chopped strokes; quiet nocturnal interior; tactile oil, still and reflective, no anime lineart."
+  - id: road_vortex
+    type: text_to_image
+    prompt: "Contemporary expressionist heavy impasto oil, sculptural palette-knife texture with visible gouges and ridges. A solitary dark human silhouette stands centered on a winding asphalt road through a quiet ordinary landscape under muted skies. From inside the figure's head and torso a swirling vortex of thick paint — glowing orange, sulphur-flame, gold, teal — warps the frame while the outer landscape stays still. External calm vs internal storm. Tactile surface, original composition, no on-canvas slogan unless the poem supplies one."
+  - id: poppy_field
+    type: text_to_image
+    prompt: "A woman with dark hair and closed eyes standing in a dense field of red and orange poppies, black lace dress that reads as thick painted strokes, gold-leaf and knife-marked sky behind her. Heavy impasto poppies, sculptural petals, lush red-and-gold field, figure a little more finished than the painted world, tactile oil, no anime lineart."
+  - id: red_dress_butterflies
+    type: text_to_image
+    prompt: "A woman in a strapless crimson gown that is itself made of thick oil strokes, dark hair with a red flower, looking back over her shoulder as butterflies lift off the dress into a loose grey-beige painted field. Palette-knife background, tactile red fabric-as-paint, romantic and airy, no clean lineart."
