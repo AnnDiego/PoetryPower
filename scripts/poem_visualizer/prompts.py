@@ -43,6 +43,11 @@ _MOTION_BY_STYLE = {
         "subtle handheld drift through urban night; "
         "reflections shimmer on wet pavement; charged, romantic energy."
     ),
+    "thick_impasto": (
+        "Paint ridges catch shifting light; slow living texture as if a "
+        "palette knife just passed; optional sky swirl or petal drift when "
+        "the verse calls for it; the world stays oil on canvas — not live-action film."
+    ),
 }
 
 _DEFAULT_MOTION = (

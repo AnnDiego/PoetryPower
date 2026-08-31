@@ -30,7 +30,10 @@ from .utils import collapse_whitespace
 #   romantic_anime + charcoal_sketch are weighted for quiet desert/night
 #   intimacy. anime_cyberpunk picks up modern tech + romance (touchscreen,
 #   Cybertruck, neon, stainless). moody_comic keeps bittersweet noir. collage
-#   stays transformation / verse-as-material.
+#   stays transformation / verse-as-material. thick_impasto claims tactile
+#   oil / canvas / knife-storm / lush painted field / moonlit interior oil
+#   — not desert-hush sketch, neon cyber, or comic-panel noir. Quiet night
+#   poems may land here (oil moonlight) instead of only charcoal.
 # ---------------------------------------------------------------------------
 
 STYLE_KEYWORDS: Dict[str, set] = {
@@ -148,6 +151,30 @@ STYLE_KEYWORDS: Dict[str, set] = {
         "rocket", "flare", "launch", "plume", "engine", "engines",
         "hobby flare", "private launch", "arc", "smoke",
     },
+    "thick_impasto": {
+        # Medium — tactile oil on canvas (do not steal sketch / neon / panel)
+        "impasto", "oil", "oils", "oil paint", "oil painting", "canvas",
+        "paint", "painted", "painterly", "palette-knife", "palette knife",
+        "knife", "knife-stroke", "knife-strokes", "brushstroke", "brushstrokes",
+        "brushwork", "ridges", "gouges", "tactile", "sculptural",
+        "wet-into-wet", "gold-leaf", "gold leaf", "loaded-brush", "loaded brush",
+        "thick paint", "thick oil",
+        # Sunlit impressionist figure (beach register — not desert-hush sand)
+        "impressionist", "impressionism",
+        # Cozy bookish oil
+        "books", "bookish", "hardcover",
+        # Swirl-night romance (only when the verse already swirls)
+        "swirl", "swirling", "swirls", "starry night",
+        # Quiet moonlit interior oil — may claim night poems vs charcoal
+        "moonlit", "moonlight", "moonlit interior", "oil moonlight",
+        "window", "interior", "nocturnal", "longing",
+        # Contemporary psychological knife-storm
+        "paint-storm", "paint storm", "vortex", "knife-storm",
+        "psychological", "existential",
+        # Lush painted field / Art Muse glam
+        "poppy", "poppies", "lush", "painted field", "blooming",
+        "crimson", "butterflies",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -157,6 +184,7 @@ STYLE_KEYWORDS: Dict[str, set] = {
 # a certain way — not a substitute for STYLE_KEYWORDS scene coverage.
 # romantic_anime / charcoal_sketch: quiet warmth, desert hush, starlit closeness.
 # anime_cyberpunk: modern glow, tech-romance, urban night charge.
+# thick_impasto: tactile oil, canvas, knife-storm, lush field, moonlit interior.
 # ---------------------------------------------------------------------------
 
 VIBE_BOOSTS: Dict[str, set] = {
@@ -183,6 +211,11 @@ VIBE_BOOSTS: Dict[str, set] = {
         "neon", "urban", "night", "electric", "modern",
         "glowing", "chrome", "futuristic", "edgy", "charged",
         "tech", "digital", "sleek", "passionate",
+    },
+    "thick_impasto": {
+        "tactile", "painterly", "sculptural", "lush", "oil",
+        "canvas", "impasto", "moonlit", "passionate", "blooming",
+        "painted", "thick",
     },
 }
 
