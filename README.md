@@ -29,6 +29,7 @@ The styles/ directory contains the living style catalog used by the visualizer:
 - Moody Comic
 - Artistic Collage
 - Anime Cyberpunk
+- Thick Impasto
 
 ## Setup
 python -m venv .venv
