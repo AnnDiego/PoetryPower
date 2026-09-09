@@ -207,6 +207,12 @@ def render_report(result: RunResult) -> str:
             lines.append(f"- Writer: {write.error}")
     if result.dry:
         lines.append("- Dry / no-key path: live writer was not called.")
+    if result.imagined:
+        imagine_status = "ok"
+    elif result.dry:
+        imagine_status = "skipped (dry / no key)"
+    else:
+        imagine_status = "skipped / failed"
     lines += [
         "",
         "## Imagine prompt (board default — locked template, `{HAIKU}` only)",
@@ -219,7 +225,7 @@ def render_report(result: RunResult) -> str:
         "",
         f"- Dry run: **{'yes' if result.dry else 'no'}**",
         f"- Live writer: **{'yes' if result.wrote_live else 'no'}**",
-        f"- Imagine: **{'ok' if result.imagined else 'skipped / failed'}**",
+        f"- Imagine: **{imagine_status}**",
     ]
     if result.image_url:
         lines.append(f"- Image URL: {result.image_url}")
