@@ -100,6 +100,9 @@ def write_haiku(
     date_line: str,
     weekday_vibe: str,
     weather_seed: str,
+    mode_name: str = "",
+    mode_heat: str = "",
+    mode_hint: str = "",
     api_key: Optional[str] = None,
 ) -> WriteResult:
     """One chat/completions call. Keep the first parsed three lines."""
@@ -116,6 +119,9 @@ def write_haiku(
         date_line=date_line,
         weekday_vibe=weekday_vibe,
         weather_seed=weather_seed,
+        mode_name=mode_name,
+        mode_heat=mode_heat,
+        mode_hint=mode_hint,
     )
     model = chat_model()
 

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from scripts.haiku_toast.prompts import (
     KEEPER_SAMPLE_HAIKU,
     VOICE_BRIEF,
+    VOICE_SEED_PATH,
     writer_user_prompt,
 )
 from scripts.haiku_toast.runner import format_date_line, run
@@ -31,7 +32,13 @@ from scripts.haiku_toast.syllables import (
     is_way_off,
     parse_haiku,
 )
-from scripts.haiku_toast.weather import parse_open_meteo
+from scripts.haiku_toast.voice_modes import (
+    MODE_NAMES,
+    choose_mode,
+    get_mode,
+    primary_pool,
+)
+from scripts.haiku_toast.weather import WeatherSeed, parse_open_meteo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / "scripts" / "haiku_toast" / "examples"
@@ -110,22 +117,32 @@ class StyleCatalogTests(unittest.TestCase):
 
 
 class LockedVoiceTests(unittest.TestCase):
-    def test_voice_brief_is_the_approved_scrap(self) -> None:
-        self.assertIn("sassy-tender", VOICE_BRIEF)
-        self.assertIn("marine layer", VOICE_BRIEF)
-        self.assertIn("not a forecast lecture", VOICE_BRIEF)
-        self.assertIn("Hallmark zen", VOICE_BRIEF)
+    def test_voice_brief_is_the_locked_poetess_seed(self) -> None:
+        self.assertTrue(VOICE_SEED_PATH.is_file())
+        self.assertEqual(VOICE_BRIEF, VOICE_SEED_PATH.read_text(encoding="utf-8").strip())
+        self.assertIn("Poetess Ann", VOICE_BRIEF)
+        self.assertIn("Sensual-cosmic lyric", VOICE_BRIEF)
+        self.assertIn("Heat ceiling 0–2", VOICE_BRIEF)
+        self.assertIn("breakfast voltage", VOICE_BRIEF)
+        self.assertIn("Do NOT regenerate for syllable counts", VOICE_BRIEF)
+        self.assertNotIn("sassy-tender", VOICE_BRIEF)
+        self.assertNotIn("Hallmark zen", VOICE_BRIEF)
 
-    def test_writer_user_prompt_seeds_date_and_weather(self) -> None:
+    def test_writer_user_prompt_seeds_date_weather_and_mode(self) -> None:
         text = writer_user_prompt(
             date_line="Wednesday, September 9, 2026",
             weekday_vibe="hump-day stubbornness, marine or canyon",
             weather_seed="high 76°F / low 64°F, overcast",
+            mode_name="verdant",
+            mode_heat="0–1",
+            mode_hint="Mist, May gray / June gloom",
         )
         self.assertIn("Wednesday, September 9, 2026", text)
         self.assertIn("high 76°F / low 64°F, overcast", text)
+        self.assertIn("Voice mode for this run: verdant", text)
         self.assertIn("three-line haiku", text)
         self.assertIn("morning scrap", text)
+        self.assertIn("do not regenerate for syllable counts", text)
         self.assertNotIn("Write one English 5-7-5", text)
 
 
@@ -174,6 +191,75 @@ class SyllableTests(unittest.TestCase):
         self.assertNotIn("rewrite_user_prompt", src)
         self.assertNotIn("regenerated", src)
         self.assertNotIn("rewrite_user_prompt", dir(writer_mod))
+
+
+class VoiceModeTests(unittest.TestCase):
+    def test_five_locked_modes(self) -> None:
+        self.assertEqual(
+            MODE_NAMES,
+            ["verdant", "starlit_dawn", "tender", "picnic_wink", "soft_weather_soul"],
+        )
+        self.assertEqual(get_mode("starlit-dawn").name, "starlit_dawn")
+        self.assertIsNone(get_mode("siren"))
+
+    def test_weather_primary_pools(self) -> None:
+        overcast = WeatherSeed(ok=True, high_f=68, low_f=58, condition="overcast")
+        names, _, reason = primary_pool(overcast)
+        self.assertEqual(set(names), {"verdant", "soft_weather_soul"})
+        self.assertIn("overcast", reason)
+
+        rain = WeatherSeed(ok=True, high_f=64, low_f=55, condition="rain")
+        names, _, reason = primary_pool(rain)
+        self.assertEqual(names, ["soft_weather_soul"])
+
+        fog = WeatherSeed(ok=True, high_f=66, low_f=57, condition="fog")
+        self.assertEqual(set(primary_pool(fog)[0]), {"verdant", "soft_weather_soul"})
+
+        cool_clear = WeatherSeed(ok=True, high_f=68, low_f=52, condition="clear")
+        early_names, early_w, early_r = primary_pool(cool_clear, hour=6)
+        self.assertEqual(set(early_names), {"starlit_dawn", "verdant"})
+        self.assertGreater(early_w["starlit_dawn"], early_w["verdant"])
+        self.assertIn("starlit_dawn weighted", early_r)
+        later_names, later_w, _ = primary_pool(cool_clear, hour=10)
+        self.assertGreater(later_w["verdant"], later_w["starlit_dawn"])
+
+        warm_clear = WeatherSeed(ok=True, high_f=78, low_f=64, condition="sunny")
+        self.assertEqual(set(primary_pool(warm_clear)[0]), {"verdant", "picnic_wink"})
+
+        windy = WeatherSeed(ok=True, high_f=70, low_f=58, condition="windy")
+        self.assertEqual(set(primary_pool(windy)[0]), {"soft_weather_soul", "verdant"})
+
+        missing = WeatherSeed(ok=False, error="--no-weather")
+        self.assertEqual(set(primary_pool(missing)[0]), set(MODE_NAMES))
+
+    def test_choose_mode_override_and_unknown(self) -> None:
+        weather = WeatherSeed(ok=True, high_f=70, low_f=58, condition="rain")
+        pick = choose_mode(weather, name="tender")
+        self.assertEqual(pick.mode.name, "tender")
+        self.assertEqual(pick.selection, "cli")
+        self.assertIn("--mode tender", pick.reason)
+        with self.assertRaises(ValueError) as ctx:
+            choose_mode(weather, name="siren")
+        self.assertIn("Unknown voice mode", str(ctx.exception))
+
+    def test_failed_weather_random_stays_in_five_modes(self) -> None:
+        missing = WeatherSeed(ok=False, error="unavailable")
+        names = {
+            choose_mode(missing, seed=i, allow_alternate=False).mode.name
+            for i in range(40)
+        }
+        self.assertTrue(names <= set(MODE_NAMES))
+        self.assertEqual(names, set(MODE_NAMES))
+        self.assertEqual(
+            choose_mode(missing, seed=3).mode.name,
+            choose_mode(missing, seed=3).mode.name,
+        )
+
+    def test_rain_primary_without_alternate_is_weather_soul(self) -> None:
+        rain = WeatherSeed(ok=True, high_f=64, low_f=55, condition="rain")
+        pick = choose_mode(rain, seed=1, allow_alternate=False)
+        self.assertEqual(pick.mode.name, "soft_weather_soul")
+        self.assertEqual(pick.selection, "weather")
 
 
 class WeatherParseTests(unittest.TestCase):
@@ -239,7 +325,9 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("melting butter", report)
         self.assertIn(KEEPER_SAMPLE_HAIKU, report)
         self.assertIn("Open-Meteo", report)
-        self.assertIn("sassy-tender", report)
+        self.assertIn("Poetess Ann", report)
+        self.assertIn("Sensual-cosmic lyric", report)
+        self.assertIn("## Voice mode", report)
         self.assertIn("report-only, not a gate", report)
         self.assertNotIn("target 5-7-5", report)
         self.assertIn("Dry run: **yes**", report)
@@ -261,10 +349,37 @@ class DateAndDryRunTests(unittest.TestCase):
         chosen_a = [ln for ln in report_a.splitlines() if ln.startswith("- **Chosen:**")]
         chosen_b = [ln for ln in report_b.splitlines() if ln.startswith("- **Chosen:**")]
         self.assertEqual(chosen_a, chosen_b)
-        self.assertEqual(len(chosen_a), 1)
+        self.assertEqual(len(chosen_a), 2)
         self.assertRegex(chosen_a[0], r"`(buttered|toaster_popup)`")
+        self.assertRegex(
+            chosen_a[1],
+            r"`(verdant|starlit_dawn|tender|picnic_wink|soft_weather_soul)`",
+        )
         self.assertIn("`--seed 7`", report_a)
         self.assertIn("random among enabled", report_a)
+
+    def test_dry_run_mode_override_is_separate_from_style(self) -> None:
+        _, report = self._dry(["--style", "toaster_popup", "--mode", "tender"])
+        self.assertIn("style `toaster_popup`", report)
+        self.assertIn("mode `tender`", report)
+        self.assertIn("`--mode tender`", report)
+        self.assertIn("stainless steel toaster", report)
+        self.assertIn("Voice mode for this run: tender", report)
+
+    def test_unknown_mode_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                run(
+                    [
+                        "--dry-run",
+                        "--no-weather",
+                        "--mode",
+                        "siren",
+                        "--out-dir",
+                        tmp,
+                    ]
+                )
+            self.assertIn("Unknown voice mode", str(ctx.exception))
 
     def test_haiku_override_still_fills_the_template(self) -> None:
         supplied = "Harbor light, leftover\nramen steam on the laptop\nPadres night crumbs"

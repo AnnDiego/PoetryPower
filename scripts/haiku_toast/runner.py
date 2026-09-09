@@ -8,10 +8,12 @@ Run from repo root:
     python -m scripts.haiku_toast --style buttered
     python -m scripts.haiku_toast --style toaster_popup
     python -m scripts.haiku_toast --seed 17
+    python -m scripts.haiku_toast --mode verdant
     python -m scripts.haiku_toast.runner
 
 Flow:
   San Diego date + thin weather seed
+  → voice mode (weather map, or --mode)
   → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
   → optional Grok Imagine still (reuses poem_visualizer.ImagineClient)
@@ -51,6 +53,7 @@ from .style_catalog import (
     fill_imagine_prompt,
 )
 from .syllables import counts_label, haiku_counts, parse_haiku
+from .voice_modes import MODE_NAMES, ModePick, choose_mode
 from .weather import WeatherSeed, fetch_san_diego_weather, weekday_vibe
 from .writer import WriteResult, resolve_api_key, write_haiku
 
@@ -77,6 +80,7 @@ class RunResult:
     style: Optional[ToastStyle] = None
     style_selection: str = "random"
     style_seed: Optional[int] = None
+    voice: Optional[ModePick] = None
     image_url: Optional[str] = None
     notes: List[str] = field(default_factory=list)
     artifacts: Optional[RunArtifacts] = None
@@ -131,7 +135,20 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p.add_argument(
         "--seed",
         type=int,
-        help="RNG seed for the random style pick (ignored when --style is set).",
+        help=(
+            "RNG seed for random style pick and weather-mode ties "
+            "(ignored for a pick that has an explicit --style / --mode)."
+        ),
+    )
+    p.add_argument(
+        "--mode",
+        metavar="NAME",
+        help=(
+            "Force a voice mode ("
+            + ", ".join(MODE_NAMES)
+            + "). Default: map the weather seed, with a low-weight "
+            "tender / picnic_wink alternate."
+        ),
     )
     p.add_argument(
         "--dry-run",
@@ -210,15 +227,39 @@ def render_report(result: RunResult) -> str:
         pick_line = f"random among enabled ({pool}), `--seed {result.style_seed}`"
     else:
         pick_line = f"random among enabled ({pool})"
+    voice = result.voice
+    if voice is not None:
+        mode_name = voice.mode.name
+        mode_display = voice.mode.display_name
+        mode_heat = voice.mode.heat
+        mode_reason = voice.reason
+        if voice.selection == "cli":
+            mode_pick_line = f"`--mode {mode_name}`"
+        elif voice.selection == "random":
+            mode_pick_line = "random among all five modes (weather unavailable)"
+        else:
+            mode_pick_line = "weather map (Imagine style is separate)"
+    else:
+        mode_name = "unknown"
+        mode_display = "unknown"
+        mode_heat = "?"
+        mode_reason = "mode was not chosen this run"
+        mode_pick_line = "n/a"
     lines = [
         f"# Daily Haiku Toast — {result.date_line}",
         "",
-        f"_San Diego · {result.weekday} · style `{style_name}`_",
+        f"_San Diego · {result.weekday} · style `{style_name}` · mode `{mode_name}`_",
         "",
         "## Style",
         "",
         f"- **Chosen:** `{style_name}` — {style_display}",
         f"- **Selection:** {pick_line}",
+        "",
+        "## Voice mode",
+        "",
+        f"- **Chosen:** `{mode_name}` — {mode_display} (heat {mode_heat})",
+        f"- **Selection:** {mode_pick_line}",
+        f"- **Reason:** {mode_reason}",
         "",
         "## Haiku",
         "",
@@ -287,7 +328,7 @@ def render_report(result: RunResult) -> str:
         "",
         "---",
         "",
-        "_Daily Haiku Toast — local style catalog. Voice brief locked._",
+        "_Daily Haiku Toast — local style catalog + Poetess Ann voice seed. Heat 0–2._",
         "",
     ]
     return "\n".join(lines)
@@ -368,7 +409,6 @@ def run(argv: Optional[List[str]] = None) -> int:
         print(f"  Style: {style.name}  (random, seed={args.seed})")
     else:
         print(f"  Style: {style.name}  (random among {', '.join(enabled_names())})")
-    print()
 
     if args.no_weather:
         weather = WeatherSeed(ok=False, error="--no-weather")
@@ -377,6 +417,17 @@ def run(argv: Optional[List[str]] = None) -> int:
         print("Fetching thin San Diego seed from Open-Meteo…")
         weather = fetch_san_diego_weather()
         print(f"  {weather.seed_line()}")
+
+    try:
+        voice = choose_mode(
+            weather,
+            name=args.mode,
+            hour=when.hour,
+            seed=None if args.mode else args.seed,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"  Mode: {voice.mode.name}  ({voice.reason})")
     print()
 
     key = resolve_api_key()
@@ -409,6 +460,9 @@ def run(argv: Optional[List[str]] = None) -> int:
             date_line=date_line,
             weekday_vibe=weekday_vibe(weekday),
             weather_seed=weather.seed_line(),
+            mode_name=voice.mode.name,
+            mode_heat=voice.mode.heat,
+            mode_hint=voice.mode.hint,
             api_key=key,
         )
         if not write.ok:
@@ -443,6 +497,9 @@ def run(argv: Optional[List[str]] = None) -> int:
             date_line=date_line,
             weekday_vibe=weekday_vibe(weekday),
             weather_seed=weather.seed_line(),
+            mode_name=voice.mode.name,
+            mode_heat=voice.mode.heat,
+            mode_hint=voice.mode.hint,
         )
         notes.append("Writer system brief + user seed saved in this report's notes.")
         print("─" * 56)
@@ -491,6 +548,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         style=style,
         style_selection=style_selection,
         style_seed=None if args.style else args.seed,
+        voice=voice,
         image_url=image_url,
         notes=notes,
         write=write,
@@ -508,7 +566,7 @@ def run(argv: Optional[List[str]] = None) -> int:
     print(f"Report → {artifacts.report_path}")
     if artifacts.image_path:
         print(f"Image  → {artifacts.image_path}")
-    print(f"Style `{style.name}` from the local toast catalog.")
+    print(f"Style `{style.name}` · mode `{voice.mode.name}`.")
     print("─" * 56)
     return 0
 
