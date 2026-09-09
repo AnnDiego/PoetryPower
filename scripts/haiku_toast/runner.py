@@ -5,12 +5,15 @@ Daily Haiku Toast runner.
 Run from repo root:
     python -m scripts.haiku_toast
     python -m scripts.haiku_toast --dry-run
+    python -m scripts.haiku_toast --style buttered
+    python -m scripts.haiku_toast --style toaster_popup
+    python -m scripts.haiku_toast --seed 17
     python -m scripts.haiku_toast.runner
 
 Flow:
   San Diego date + thin weather seed
   → one English 5-7-5 (xAI chat, or dry sample if no key)
-  → locked board Imagine prompt
+  → pick an enabled Imagine style (random, or --style / --seed)
   → optional Grok Imagine still (reuses poem_visualizer.ImagineClient)
   → save haiku.txt + report.md + image (when generated)
 
@@ -35,11 +38,16 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ""):
     __package__ = "scripts.haiku_toast"
 
 from .prompts import (
+    FUTURE_STYLES_NOTE,
     IMAGINE_ASPECT_RATIO,
     KEEPER_SAMPLE_HAIKU,
-    PLATE_COFFEE_NOTE,
     SAN_DIEGO_TZ,
     VOICE_BRIEF,
+)
+from .style_catalog import (
+    ToastStyle,
+    choose_style,
+    enabled_names,
     fill_imagine_prompt,
 )
 from .syllables import counts_label, haiku_counts, parse_haiku
@@ -66,6 +74,9 @@ class RunResult:
     dry: bool
     wrote_live: bool
     imagined: bool
+    style: Optional[ToastStyle] = None
+    style_selection: str = "random"
+    style_seed: Optional[int] = None
     image_url: Optional[str] = None
     notes: List[str] = field(default_factory=list)
     artifacts: Optional[RunArtifacts] = None
@@ -106,8 +117,21 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         prog="python -m scripts.haiku_toast",
         description=(
             "Daily Haiku Toast: San Diego date + weather seed → 5-7-5 → "
-            "board-style Imagine still."
+            "Imagine still from the local toast style catalog."
         ),
+    )
+    p.add_argument(
+        "--style",
+        metavar="NAME",
+        help=(
+            "Force a catalog style (buttered, toaster_popup). "
+            "Default: random among enabled styles."
+        ),
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        help="RNG seed for the random style pick (ignored when --style is set).",
     )
     p.add_argument(
         "--dry-run",
@@ -175,11 +199,26 @@ def _download_image(url: str, dest: Path) -> Optional[str]:
 def render_report(result: RunResult) -> str:
     weather = result.weather
     write = result.write
+    style = result.style
+    style_name = style.name if style else "unknown"
+    style_display = style.display_name if style else "unknown"
     counts = haiku_counts(result.haiku.splitlines()) if result.haiku else []
+    pool = ", ".join(f"`{n}`" for n in enabled_names())
+    if result.style_selection == "cli":
+        pick_line = f"`--style {style_name}`"
+    elif result.style_seed is not None:
+        pick_line = f"random among enabled ({pool}), `--seed {result.style_seed}`"
+    else:
+        pick_line = f"random among enabled ({pool})"
     lines = [
         f"# Daily Haiku Toast — {result.date_line}",
         "",
-        f"_San Diego · {result.weekday} · board default (v1)_",
+        f"_San Diego · {result.weekday} · style `{style_name}`_",
+        "",
+        "## Style",
+        "",
+        f"- **Chosen:** `{style_name}` — {style_display}",
+        f"- **Selection:** {pick_line}",
         "",
         "## Haiku",
         "",
@@ -215,7 +254,7 @@ def render_report(result: RunResult) -> str:
         imagine_status = "skipped / failed"
     lines += [
         "",
-        "## Imagine prompt (board default — locked template, `{HAIKU}` only)",
+        f"## Imagine prompt (`{style_name}` — catalog template, `{{HAIKU}}` only)",
         "",
         "```",
         result.imagine_prompt.rstrip(),
@@ -247,12 +286,12 @@ def render_report(result: RunResult) -> str:
         "",
         "## Later (not v1)",
         "",
-        "- Site / Notion post, daily auto-X, physical toaster, toast agent, style roulette.",
-        f"- {PLATE_COFFEE_NOTE}",
+        "- Site / Notion post, daily auto-X, physical toaster, toast agent.",
+        f"- {FUTURE_STYLES_NOTE}",
         "",
         "---",
         "",
-        "_Daily Haiku Toast MVP — board style. Voice brief locked._",
+        "_Daily Haiku Toast — local style catalog. Voice brief locked._",
         "",
     ]
     return "\n".join(lines)
@@ -319,8 +358,20 @@ def run(argv: Optional[List[str]] = None) -> int:
     date_line = format_date_line(when)
     weekday = when.strftime("%A")
 
+    try:
+        style = choose_style(name=args.style, seed=args.seed)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    style_selection = "cli" if args.style else "random"
+
     print("Daily Haiku Toast  ·  San Diego morning scrap, burned into crust")
     print(f"  {date_line}  ({SAN_DIEGO_TZ})")
+    if style_selection == "cli":
+        print(f"  Style: {style.name}  (--style)")
+    elif args.seed is not None:
+        print(f"  Style: {style.name}  (random, seed={args.seed})")
+    else:
+        print(f"  Style: {style.name}  (random among {', '.join(enabled_names())})")
     print()
 
     if args.no_weather:
@@ -349,12 +400,12 @@ def run(argv: Optional[List[str]] = None) -> int:
         haiku = KEEPER_SAMPLE_HAIKU
         if args.dry_run:
             notes.append("Dry-run: sample keeper haiku, no chat call.")
-            print("Dry-run. Using the board-keeper sample haiku (no chat call).\n")
+            print("Dry-run. Using the keeper sample haiku (no chat call).\n")
         else:
             notes.append("No XAI_API_KEY — prompt-only. Sample keeper haiku filled in.")
             print(
                 "No XAI_API_KEY. Prompt-only path. "
-                "Filling the locked template with the board-keeper sample.\n"
+                "Filling the chosen style template with the keeper sample.\n"
             )
     else:
         print("XAI_API_KEY found. Asking the writer for this morning's scrap…")
@@ -366,7 +417,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         )
         if not write.ok:
             print(f"  Writer failed: {write.error}")
-            print("  Falling back to the board-keeper sample so Imagine can still run.\n")
+            print("  Falling back to the keeper sample so Imagine can still run.\n")
             haiku = KEEPER_SAMPLE_HAIKU
             notes.append(f"Writer failed ({write.error}); used keeper sample.")
         else:
@@ -385,9 +436,9 @@ def run(argv: Optional[List[str]] = None) -> int:
     print(haiku)
     print()
 
-    imagine_prompt = fill_imagine_prompt(haiku)
+    imagine_prompt = fill_imagine_prompt(haiku, style)
     print("─" * 56)
-    print("IMAGINE PROMPT  (board default · locked · {HAIKU} only)")
+    print(f"IMAGINE PROMPT  ({style.name} · catalog · {{HAIKU}} only)")
     print("─" * 56)
     print(imagine_prompt)
     print()
@@ -446,6 +497,9 @@ def run(argv: Optional[List[str]] = None) -> int:
         dry=dry,
         wrote_live=wrote_live,
         imagined=imagined,
+        style=style,
+        style_selection=style_selection,
+        style_seed=None if args.style else args.seed,
         image_url=image_url,
         notes=notes,
         write=write,
@@ -463,7 +517,7 @@ def run(argv: Optional[List[str]] = None) -> int:
     print(f"Report → {artifacts.report_path}")
     if artifacts.image_path:
         print(f"Image  → {artifacts.image_path}")
-    print("Board default locked. Plate-with-coffee is a later A/B.")
+    print(f"Style `{style.name}` from the local toast catalog.")
     print("─" * 56)
     return 0
 

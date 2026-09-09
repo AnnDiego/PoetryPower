@@ -17,20 +17,30 @@ Run from the repo root (with venv activated):
 python -m scripts.poem_visualizer.visualizer
 
 ### haiku_toast
-Daily Haiku Toast MVP. San Diego date + a thin weather seed → one English 5-7-5 in Ann’s voice → Grok Imagine still of toast with the haiku burned into the crust (board default).
+Daily Haiku Toast. San Diego date + a thin weather seed → one English 5-7-5 in Ann’s voice → Grok Imagine still of toast with the haiku burned into the crust.
+
+Each run picks one **enabled Imagine style** from a small catalog local to this package (not the `styles/` visualizer catalog). Default is random among enabled styles; pass `--seed` to reproduce a pick, or `--style` to force one.
+
+Enabled now:
+- `buttered` — rustic wooden board, melting butter on the toast (board default evolution). Keeper: `scripts/haiku_toast/examples/buttered.jpg`
+- `toaster_popup` — slice rising from a stainless toaster; juice or tea in the background. Keeper: `scripts/haiku_toast/examples/toaster_popup.jpg`
+
+Plate, avocado, and egg stay out of the enabled pool (plate still: `scripts/haiku_toast/examples/toast-plate.jpg`). Add a future style by appending a `ToastStyle(enabled=True)` in `scripts/haiku_toast/style_catalog.py` — no even/odd hacks.
 
 Run from the repo root (with venv activated):
 python -m scripts.haiku_toast
 python -m scripts.haiku_toast --dry-run
+python -m scripts.haiku_toast --style buttered
+python -m scripts.haiku_toast --style toaster_popup
+python -m scripts.haiku_toast --seed 17
 
-- No `XAI_API_KEY`: prompt-only (writer seed + locked Imagine template, keeper sample haiku).
+- No `XAI_API_KEY`: prompt-only (writer seed + chosen style template, keeper sample haiku).
 - With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`.
 - Weather: Open-Meteo (https://open-meteo.com/) high/low °F + one condition word for downtown San Diego. Not a weather product.
-- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when Imagine succeeds). Generated images are gitignored.
-- Board style is v1. Plate-with-coffee is a later A/B only (`scripts/haiku_toast/examples/`).
+- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when Imagine succeeds). The report records which style was chosen. Generated images are gitignored.
 - Site posting, daily auto-X, Notion, and a physical toaster are follow-ups — not in this runner.
 
-Locked Imagine template (replace `{HAIKU}` only) lives in `scripts/haiku_toast/prompts.py`.
+Imagine templates (replace `{HAIKU}` only) live in `scripts/haiku_toast/style_catalog.py`. Both enabled templates require exactly three lines and letters that follow the crumb as Maillard browning, not printed ink.
 
 ### Other tools
 - poem_analyzer.py – Poem feedback / analysis

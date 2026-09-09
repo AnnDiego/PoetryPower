@@ -1,4 +1,4 @@
-"""Checks for the Daily Haiku Toast runner: locked template, dry path, weather parse."""
+"""Checks for the Daily Haiku Toast runner: catalog, dry path, weather parse."""
 
 from __future__ import annotations
 
@@ -9,13 +9,22 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from scripts.haiku_toast.prompts import (
-    IMAGINE_TEMPLATE,
     KEEPER_SAMPLE_HAIKU,
     VOICE_BRIEF,
-    fill_imagine_prompt,
     writer_user_prompt,
 )
 from scripts.haiku_toast.runner import format_date_line, run
+from scripts.haiku_toast.style_catalog import (
+    BUTTERED_TEMPLATE,
+    TOASTER_POPUP_TEMPLATE,
+    ToastStyle,
+    choose_style,
+    enabled_names,
+    fill_imagine_prompt,
+    get_style,
+    load_catalog,
+    load_styles,
+)
 from scripts.haiku_toast.syllables import (
     count_syllables,
     haiku_counts,
@@ -26,26 +35,81 @@ from scripts.haiku_toast.weather import parse_open_meteo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / "scripts" / "haiku_toast" / "examples"
+ENABLED = {"buttered", "toaster_popup"}
 
 
-class LockedTemplateTests(unittest.TestCase):
-    def test_template_has_single_placeholder(self) -> None:
-        self.assertEqual(IMAGINE_TEMPLATE.count("{HAIKU}"), 1)
-        self.assertIn("rustic wooden board", IMAGINE_TEMPLATE)
-        self.assertIn("Maillard browning", IMAGINE_TEMPLATE)
-        self.assertNotIn("ceramic plate", IMAGINE_TEMPLATE)
-        self.assertNotIn("coffee", IMAGINE_TEMPLATE.lower())
+class StyleCatalogTests(unittest.TestCase):
+    def test_loads_enabled_buttered_and_toaster_popup_only(self) -> None:
+        catalog = load_catalog()
+        names = {s.name for s in catalog}
+        self.assertEqual(names, ENABLED)
+        self.assertEqual(set(enabled_names()), ENABLED)
+        self.assertEqual(set(load_styles()), ENABLED)
+        for style in catalog:
+            self.assertTrue(style.enabled)
 
-    def test_fill_replaces_haiku_only(self) -> None:
-        haiku = "one\ntwo\nthree"
-        filled = fill_imagine_prompt(haiku)
-        self.assertNotIn("{HAIKU}", filled)
-        self.assertIn(haiku, filled)
+    def test_lookup_accepts_hyphen_and_display_name(self) -> None:
+        self.assertEqual(get_style("toaster_popup").name, "toaster_popup")
+        self.assertEqual(get_style("toaster-popup").name, "toaster_popup")
+        self.assertEqual(get_style("Buttered (board)").name, "buttered")
+        self.assertIsNone(get_style("plate"))
+        self.assertIsNone(get_style("avocado"))
+        self.assertIsNone(get_style("egg"))
+
+    def test_choose_style_override_and_unknown(self) -> None:
+        self.assertEqual(choose_style(name="buttered").name, "buttered")
+        self.assertEqual(choose_style(name="toaster_popup").name, "toaster_popup")
+        with self.assertRaises(ValueError) as ctx:
+            choose_style(name="avocado")
+        self.assertIn("Unknown toast style", str(ctx.exception))
+        self.assertIn("buttered", str(ctx.exception))
+
+    def test_random_pick_stays_in_enabled_set(self) -> None:
+        extra = list(load_catalog()) + [
+            ToastStyle(
+                name="plate",
+                display_name="Plate (future)",
+                imagine_template="plate {HAIKU}",
+                enabled=False,
+            )
+        ]
+        names = {choose_style(catalog=extra, seed=i).name for i in range(40)}
+        self.assertTrue(names <= ENABLED)
+        self.assertEqual(names, ENABLED)
+        self.assertNotIn("plate", names)
+        self.assertEqual(choose_style(catalog=extra, seed=1).name, choose_style(catalog=extra, seed=1).name)
+
+    def test_templates_require_three_lines_and_maillard(self) -> None:
+        for style in load_catalog():
+            tmpl = style.imagine_template
+            self.assertEqual(tmpl.count("{HAIKU}"), 1)
+            self.assertIn("exactly three lines", tmpl)
+            self.assertIn("crumb", tmpl.lower())
+            self.assertIn("Maillard browning", tmpl)
+            self.assertIn("not printed ink", tmpl)
+            filled = style.fill(KEEPER_SAMPLE_HAIKU)
+            self.assertNotIn("{HAIKU}", filled)
+            self.assertIn(KEEPER_SAMPLE_HAIKU, filled)
+
+    def test_fill_defaults_to_buttered(self) -> None:
+        filled = fill_imagine_prompt("one\ntwo\nthree")
+        self.assertIn("rustic wooden board", filled)
+        self.assertIn("melting butter", filled)
         self.assertEqual(
-            filled.replace(haiku, "{HAIKU}"),
-            IMAGINE_TEMPLATE,
+            filled.replace("one\ntwo\nthree", "{HAIKU}"),
+            BUTTERED_TEMPLATE,
+        )
+        toaster = fill_imagine_prompt("one\ntwo\nthree", get_style("toaster_popup"))
+        self.assertIn("stainless steel toaster", toaster)
+        self.assertIn("orange juice", toaster)
+        self.assertNotIn("melting butter", toaster)
+        self.assertEqual(
+            toaster.replace("one\ntwo\nthree", "{HAIKU}"),
+            TOASTER_POPUP_TEMPLATE,
         )
 
+
+class LockedVoiceTests(unittest.TestCase):
     def test_voice_brief_is_the_approved_scrap(self) -> None:
         self.assertIn("sassy-tender", VOICE_BRIEF)
         self.assertIn("marine layer", VOICE_BRIEF)
@@ -130,7 +194,7 @@ class DateAndDryRunTests(unittest.TestCase):
         when = datetime(2026, 9, 9, 8, 15, tzinfo=ZoneInfo("America/Los_Angeles"))
         self.assertEqual(format_date_line(when), "Wednesday, September 9, 2026")
 
-    def test_dry_run_writes_haiku_and_report_without_key(self) -> None:
+    def _dry(self, extra: list[str]) -> tuple[str, str]:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             rc = run(
@@ -141,6 +205,7 @@ class DateAndDryRunTests(unittest.TestCase):
                     "2026-09-09",
                     "--out-dir",
                     str(out),
+                    *extra,
                 ]
             )
             self.assertEqual(rc, 0)
@@ -149,47 +214,90 @@ class DateAndDryRunTests(unittest.TestCase):
             self.assertEqual(len(haikus), 1)
             self.assertEqual(len(reports), 1)
             self.assertFalse(list(out.glob("*.jpg")))
-            haiku_text = haikus[0].read_text(encoding="utf-8")
-            report = reports[0].read_text(encoding="utf-8")
-            self.assertIn("Crisp slice, quiet dawn", haiku_text)
-            self.assertIn("Wednesday, September 9, 2026", report)
-            self.assertIn("rustic wooden board", report)
-            self.assertIn(KEEPER_SAMPLE_HAIKU, report)
-            self.assertIn("Open-Meteo", report)
-            self.assertIn("sassy-tender", report)
-            self.assertIn("Dry run: **yes**", report)
-            self.assertIn("Imagine: **skipped (dry / no key)**", report)
-            # Heading mentions the placeholder; the filled prompt must not.
-            prompt_block = report.split("```", 2)[1]
-            self.assertNotIn("{HAIKU}", prompt_block)
-            self.assertIn("Crisp slice, quiet dawn", prompt_block)
+            return haikus[0].read_text(encoding="utf-8"), reports[0].read_text(encoding="utf-8")
+
+    def test_dry_run_writes_haiku_and_report_without_key(self) -> None:
+        haiku_text, report = self._dry(["--style", "buttered"])
+        self.assertIn("Crisp slice, quiet dawn", haiku_text)
+        self.assertIn("Wednesday, September 9, 2026", report)
+        self.assertIn("style `buttered`", report)
+        self.assertIn("**Chosen:** `buttered`", report)
+        self.assertIn("`--style buttered`", report)
+        self.assertIn("rustic wooden board", report)
+        self.assertIn("exactly three lines", report)
+        self.assertIn("melting butter", report)
+        self.assertIn(KEEPER_SAMPLE_HAIKU, report)
+        self.assertIn("Open-Meteo", report)
+        self.assertIn("sassy-tender", report)
+        self.assertIn("Dry run: **yes**", report)
+        self.assertIn("Imagine: **skipped (dry / no key)**", report)
+        prompt_block = report.split("```", 2)[1]
+        self.assertNotIn("{HAIKU}", prompt_block)
+        self.assertIn("Crisp slice, quiet dawn", prompt_block)
+
+    def test_dry_run_toaster_popup_override(self) -> None:
+        _, report = self._dry(["--style", "toaster_popup"])
+        self.assertIn("style `toaster_popup`", report)
+        self.assertIn("stainless steel toaster", report)
+        self.assertIn("orange juice", report)
+        self.assertNotIn("melting butter", report.split("```", 2)[1])
+
+    def test_dry_run_seed_is_reproducible(self) -> None:
+        _, report_a = self._dry(["--seed", "7"])
+        _, report_b = self._dry(["--seed", "7"])
+        chosen_a = [ln for ln in report_a.splitlines() if ln.startswith("- **Chosen:**")]
+        chosen_b = [ln for ln in report_b.splitlines() if ln.startswith("- **Chosen:**")]
+        self.assertEqual(chosen_a, chosen_b)
+        self.assertEqual(len(chosen_a), 1)
+        self.assertRegex(chosen_a[0], r"`(buttered|toaster_popup)`")
+        self.assertIn("`--seed 7`", report_a)
+        self.assertIn("random among enabled", report_a)
+
+    def test_unknown_style_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                run(
+                    [
+                        "--dry-run",
+                        "--no-weather",
+                        "--style",
+                        "avocado",
+                        "--out-dir",
+                        tmp,
+                    ]
+                )
+            self.assertIn("Unknown toast style", str(ctx.exception))
 
     def test_reuses_visualizer_imagine_client(self) -> None:
         import scripts.haiku_toast.runner as runner
         from scripts.poem_visualizer.imagine_client import ImagineClient
 
         self.assertIs(runner._maybe_imagine.__globals__.get("ImagineClient"), None)
-        # Import path is inside the function to keep startup thin; check source.
         src = Path(runner.__file__).read_text(encoding="utf-8")
         self.assertIn(
             "from scripts.poem_visualizer.imagine_client import ImagineClient",
             src,
         )
+        self.assertNotIn("poem_visualizer.style_loader", src)
         self.assertTrue(hasattr(ImagineClient, "generate_image"))
         self.assertTrue(hasattr(ImagineClient, "from_env"))
 
 
 class KeeperStillsTests(unittest.TestCase):
-    def test_board_and_plate_examples_exist(self) -> None:
-        board = EXAMPLES / "toast-board.jpg"
+    def test_enabled_and_future_examples_exist(self) -> None:
+        buttered = EXAMPLES / "buttered.jpg"
+        toaster = EXAMPLES / "toaster_popup.jpg"
         plate = EXAMPLES / "toast-plate.jpg"
-        self.assertTrue(board.is_file(), f"missing {board}")
-        self.assertTrue(plate.is_file(), f"missing {plate}")
-        self.assertGreater(board.stat().st_size, 1000)
-        self.assertGreater(plate.stat().st_size, 1000)
+        board = EXAMPLES / "toast-board.jpg"
+        for path in (buttered, toaster, plate, board):
+            self.assertTrue(path.is_file(), f"missing {path}")
+            self.assertGreater(path.stat().st_size, 1000)
         note = (EXAMPLES / "README.md").read_text(encoding="utf-8")
-        self.assertIn("v1 default", note)
-        self.assertIn("Later A/B", note)
+        self.assertIn("buttered", note)
+        self.assertIn("toaster_popup", note)
+        self.assertIn("not in the enabled pool", note)
+        self.assertIn("avocado", note)
+        self.assertIn("egg", note)
 
 
 if __name__ == "__main__":
