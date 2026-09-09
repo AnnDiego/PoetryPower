@@ -12,7 +12,7 @@ Run from repo root:
 
 Flow:
   San Diego date + thin weather seed
-  → one English 5-7-5 (xAI chat, or dry sample if no key)
+  → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
   → optional Grok Imagine still (reuses poem_visualizer.ImagineClient)
   → save haiku.txt + report.md + image (when generated)
@@ -116,8 +116,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="python -m scripts.haiku_toast",
         description=(
-            "Daily Haiku Toast: San Diego date + weather seed → 5-7-5 → "
-            "Imagine still from the local toast style catalog."
+            "Daily Haiku Toast: San Diego date + weather seed → "
+            "short three-line haiku → Imagine still from the local catalog."
         ),
     )
     p.add_argument(
@@ -231,15 +231,11 @@ def render_report(result: RunResult) -> str:
         f"- **Weather:** {weather.seed_line()}",
         f"- **Source:** {weather.source} ({weather.source_url}) — high/low °F + one condition word. Not a weather product.",
         "",
-        "## Syllables (cheap heuristic)",
+        "## Syllables (optional heuristic)",
         "",
-        f"- Count: `{counts_label(counts) or 'n/a'}`  (target 5-7-5)",
+        f"- Count: `{counts_label(counts) or 'n/a'}` — report-only, not a gate.",
     ]
     if write is not None:
-        if write.regenerated:
-            lines.append("- Regenerated once after the first pass looked way off.")
-        if write.way_off:
-            lines.append("- Still way off after one retry — kept as-is (soft fail).")
         if write.model:
             lines.append(f"- Chat model: `{write.model}`")
         if write.error:
@@ -423,11 +419,6 @@ def run(argv: Optional[List[str]] = None) -> int:
         else:
             haiku = write.haiku
             wrote_live = True
-            print(f"  Syllables: {counts_label(write.counts)}  (target 5-7-5)")
-            if write.regenerated:
-                print("  Regenerated once (heuristic was way off).")
-            if write.way_off:
-                print("  Still way off after one retry — keeping it (soft fail).")
             print()
 
     print("─" * 56)

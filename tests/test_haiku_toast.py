@@ -124,7 +124,9 @@ class LockedVoiceTests(unittest.TestCase):
         )
         self.assertIn("Wednesday, September 9, 2026", text)
         self.assertIn("high 76°F / low 64°F, overcast", text)
-        self.assertIn("5-7-5", text)
+        self.assertIn("three-line haiku", text)
+        self.assertIn("morning scrap", text)
+        self.assertNotIn("Write one English 5-7-5", text)
 
 
 class SyllableTests(unittest.TestCase):
@@ -163,6 +165,15 @@ class SyllableTests(unittest.TestCase):
 
     def test_seventeen_is_three_syllables(self) -> None:
         self.assertEqual(count_syllables("seventeen"), 3)
+
+    def test_writer_does_not_retry_on_counts(self) -> None:
+        from scripts.haiku_toast import writer as writer_mod
+
+        src = Path(writer_mod.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("is_way_off", src)
+        self.assertNotIn("rewrite_user_prompt", src)
+        self.assertNotIn("regenerated", src)
+        self.assertNotIn("rewrite_user_prompt", dir(writer_mod))
 
 
 class WeatherParseTests(unittest.TestCase):
@@ -229,6 +240,8 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn(KEEPER_SAMPLE_HAIKU, report)
         self.assertIn("Open-Meteo", report)
         self.assertIn("sassy-tender", report)
+        self.assertIn("report-only, not a gate", report)
+        self.assertNotIn("target 5-7-5", report)
         self.assertIn("Dry run: **yes**", report)
         self.assertIn("Imagine: **skipped (dry / no key)**", report)
         prompt_block = report.split("```", 2)[1]
@@ -252,6 +265,18 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertRegex(chosen_a[0], r"`(buttered|toaster_popup)`")
         self.assertIn("`--seed 7`", report_a)
         self.assertIn("random among enabled", report_a)
+
+    def test_haiku_override_still_fills_the_template(self) -> None:
+        supplied = "Harbor light, leftover\nramen steam on the laptop\nPadres night crumbs"
+        haiku_text, report = self._dry(
+            ["--style", "buttered", "--haiku", supplied.replace("\n", "\\n")]
+        )
+        self.assertIn("Harbor light, leftover", haiku_text)
+        self.assertIn("Harbor light, leftover", report)
+        self.assertIn("writer skipped", report.lower())
+        prompt_block = report.split("```", 2)[1]
+        self.assertIn("Harbor light, leftover", prompt_block)
+        self.assertIn("rustic wooden board", prompt_block)
 
     def test_unknown_style_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
