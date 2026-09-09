@@ -1,0 +1,10 @@
+# Daily Haiku Toast — same runtime family as poem_visualizer
+# (Imagine client + .env loading + Open-Meteo + chat/completions).
+#
+# From repo root:
+#   pip install -r scripts/haiku_toast/requirements.txt
+# or reuse:
+#   pip install -r scripts/poem_visualizer/requirements.txt
+
+requests>=2.28.0
+python-dotenv>=1.0.0

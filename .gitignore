@@ -210,3 +210,10 @@ scripts/.DS_Store
 scripts/starship10_venv/
 scripts/private/
 *.pyc
+
+# Daily Haiku Toast run output (images are large; keep examples/ in the package)
+/toasts/*.jpg
+/toasts/*.jpeg
+/toasts/*.png
+/toasts/*.webp
+
