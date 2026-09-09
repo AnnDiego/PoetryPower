@@ -1,8 +1,8 @@
 """
-Cheap English syllable heuristic for a one-retry 5-7-5 check.
+Cheap English syllable heuristic — optional report metadata only.
 
-Independent of poem_analyzer — this package is not that writer.
-Good enough to catch a howler; not a scansion product.
+Independent of poem_analyzer. Does not gate, retry, or fail a run.
+Not a scansion product.
 """
 
 from __future__ import annotations
