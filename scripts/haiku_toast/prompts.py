@@ -1,28 +1,36 @@
 """
-Locked Imagine template + Ann's approved writer brief.
+Ann's approved writer brief + shared Imagine constants.
 
-Do not redesign. The Imagine template replaces {HAIKU} only.
-Board-on-wood is the v1 default. Plate-with-coffee is a later A/B
-(see examples/README.md) and is not wired into the runner.
+Imagine templates live in style_catalog.py (local toast catalog).
+Do not pull styles from poem_visualizer.
 """
 
 from __future__ import annotations
+
+from .style_catalog import fill_imagine_prompt
+
+# Re-export so existing imports keep working.
+__all__ = [
+    "VOICE_BRIEF",
+    "KEEPER_SAMPLE_HAIKU",
+    "WEATHER_SOURCE",
+    "WEATHER_SOURCE_URL",
+    "SAN_DIEGO_LAT",
+    "SAN_DIEGO_LON",
+    "SAN_DIEGO_TZ",
+    "IMAGINE_ASPECT_RATIO",
+    "FUTURE_STYLES_NOTE",
+    "fill_imagine_prompt",
+    "writer_user_prompt",
+    "rewrite_user_prompt",
+]
 
 # Ann-approved voice brief (embed in the chat writer as-is).
 VOICE_BRIEF = """\
 Write her morning scrap burned into toast — not museum haiku, not coffee-shop wallpaper. Tone: sassy-tender. Concrete. One clear image + a small turn. San Diego body: marine layer, canyon heat, harbor light, Padres nights, picnic leftovers, Starship sky, ramen steam, tech residual in the crumbs. Weather seeds today’s freshness, not a forecast lecture. Do: short three lines, sensory, present tense or clean snapshot. Don’t: Hallmark zen, cherry-blossom tourism, forced broken English for syllables, merch pitch, self-help, tourist San Diego explainers, captions/watermarks.
 """
 
-# Locked Grok Imagine prompt. Replace {HAIKU} only.
-IMAGINE_TEMPLATE = """\
-Photorealistic close-up of a single slice of freshly toasted artisan bread on a rustic wooden board, warm morning sidelight, faint steam. A three-line haiku is burned into the golden crust in darker toasted-brown letters, clearly readable, following the crumb texture:
-
-{HAIKU}
-
-Letters look like selective Maillard browning, not printed ink. Small melting butter at one corner. Shallow depth of field, food-photography realism, no extra captions, no watermark.
-"""
-
-# Board-keeper sample used on the dry / no-key path so the Imagine
+# Keeper sample used on the dry / no-key path so the Imagine
 # prompt is complete and reviewable. Not a live write.
 KEEPER_SAMPLE_HAIKU = (
     "Crisp slice, quiet dawn\n"
@@ -40,16 +48,11 @@ SAN_DIEGO_TZ = "America/Los_Angeles"
 # Food-photography still (not the visualizer's 9:16 vertical).
 IMAGINE_ASPECT_RATIO = "4:3"
 
-# Later A/B only — not used by the v1 runner.
-PLATE_COFFEE_NOTE = (
-    "Plate-with-coffee is a later A/B alternative, not the v1 default. "
-    "See scripts/haiku_toast/examples/toast-plate.jpg."
+# Documented only — not in the enabled catalog.
+FUTURE_STYLES_NOTE = (
+    "Plate-with-coffee, avocado, and egg are future looks, not in the "
+    "enabled pool. See scripts/haiku_toast/examples/."
 )
-
-
-def fill_imagine_prompt(haiku: str) -> str:
-    """Substitute {HAIKU} only. Leave the rest of the locked template intact."""
-    return IMAGINE_TEMPLATE.replace("{HAIKU}", haiku.strip())
 
 
 def writer_user_prompt(

@@ -1,16 +1,30 @@
 # Daily Haiku Toast — keeper stills
 
-Reference looks for the runner. These are not a style catalog and are
-**not** loaded by `poem_visualizer`.
+Reference looks for the local toast style catalog
+(`scripts/haiku_toast/style_catalog.py`). These are **not** loaded by
+`poem_visualizer`.
 
-| File | Role |
-| --- | --- |
-| `toast-board.jpg` | **v1 default.** Rustic wooden board, warm sidelight, faint steam, melting butter, haiku burned into the crumb as Maillard browning. |
-| `toast-plate.jpg` | **Later A/B only.** Plate + coffee cup. Not wired into the v1 runner. Do not treat as a second style. |
+## Enabled (v2 random pool)
 
-Board Imagine prompt is locked in `scripts/haiku_toast/prompts.py` (`IMAGINE_TEMPLATE`). Replace `{HAIKU}` only.
+| File | Style | Role |
+| --- | --- | --- |
+| `buttered.jpg` | `buttered` | **Enabled.** Board default evolution: rustic wooden board, warm sidelight, faint steam, melting butter on the toast, haiku burned into the crumb as Maillard browning. |
+| `toaster_popup.jpg` | `toaster_popup` | **Enabled.** Slice rising from a stainless toaster; orange juice or tea in the soft background. Same burned-in three-line haiku. |
 
-Keeper sample haiku burned into both stills:
+## Future (not in the enabled pool)
+
+| File | Style | Role |
+| --- | --- | --- |
+| `toast-plate.jpg` | plate (future) | Plate + coffee cup. Documented only — not catalogued, not randomly picked. |
+| `toast-board.jpg` | — | Original v1 board still. Same family as `buttered`; kept as history. Not a third enabled style. |
+| *(none yet)* | avocado (future) | Out of the pool until Ann adds a prompt + keeper. |
+| *(none yet)* | egg (future) | Out of the pool until Ann adds a prompt + keeper. |
+
+Each enabled style's Imagine template replaces `{HAIKU}` only. Both
+templates require exactly three lines and letters that follow the crumb
+as selective Maillard browning, not printed ink.
+
+Keeper sample haiku burned into the stills:
 
 ```
 Crisp slice, quiet dawn
