@@ -5,12 +5,17 @@ Daily Haiku Toast runner.
 Run from repo root:
     python -m scripts.haiku_toast
     python -m scripts.haiku_toast --dry-run
+    python -m scripts.haiku_toast --style buttered
+    python -m scripts.haiku_toast --style toaster_popup
+    python -m scripts.haiku_toast --seed 17
+    python -m scripts.haiku_toast --mode verdant
     python -m scripts.haiku_toast.runner
 
 Flow:
   San Diego date + thin weather seed
-  → one English 5-7-5 (xAI chat, or dry sample if no key)
-  → locked board Imagine prompt
+  → voice mode (weather map, or --mode)
+  → one short three-line haiku (xAI chat, or dry sample if no key)
+  → pick an enabled Imagine style (random, or --style / --seed)
   → optional Grok Imagine still (reuses poem_visualizer.ImagineClient)
   → save haiku.txt + report.md + image (when generated)
 
@@ -35,14 +40,20 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ""):
     __package__ = "scripts.haiku_toast"
 
 from .prompts import (
+    FUTURE_STYLES_NOTE,
     IMAGINE_ASPECT_RATIO,
     KEEPER_SAMPLE_HAIKU,
-    PLATE_COFFEE_NOTE,
     SAN_DIEGO_TZ,
     VOICE_BRIEF,
+)
+from .style_catalog import (
+    ToastStyle,
+    choose_style,
+    enabled_names,
     fill_imagine_prompt,
 )
 from .syllables import counts_label, haiku_counts, parse_haiku
+from .voice_modes import MODE_NAMES, ModePick, choose_mode
 from .weather import WeatherSeed, fetch_san_diego_weather, weekday_vibe
 from .writer import WriteResult, resolve_api_key, write_haiku
 
@@ -66,6 +77,10 @@ class RunResult:
     dry: bool
     wrote_live: bool
     imagined: bool
+    style: Optional[ToastStyle] = None
+    style_selection: str = "random"
+    style_seed: Optional[int] = None
+    voice: Optional[ModePick] = None
     image_url: Optional[str] = None
     notes: List[str] = field(default_factory=list)
     artifacts: Optional[RunArtifacts] = None
@@ -105,8 +120,34 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="python -m scripts.haiku_toast",
         description=(
-            "Daily Haiku Toast: San Diego date + weather seed → 5-7-5 → "
-            "board-style Imagine still."
+            "Daily Haiku Toast: San Diego date + weather seed → "
+            "short three-line haiku → Imagine still from the local catalog."
+        ),
+    )
+    p.add_argument(
+        "--style",
+        metavar="NAME",
+        help=(
+            "Force a catalog style (buttered, toaster_popup). "
+            "Default: random among enabled styles."
+        ),
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        help=(
+            "RNG seed for random style pick and weather-mode ties "
+            "(ignored for a pick that has an explicit --style / --mode)."
+        ),
+    )
+    p.add_argument(
+        "--mode",
+        metavar="NAME",
+        help=(
+            "Force a voice mode ("
+            + ", ".join(MODE_NAMES)
+            + "). Default: map the weather seed, with a low-weight "
+            "tender / picnic_wink alternate."
         ),
     )
     p.add_argument(
@@ -175,11 +216,50 @@ def _download_image(url: str, dest: Path) -> Optional[str]:
 def render_report(result: RunResult) -> str:
     weather = result.weather
     write = result.write
+    style = result.style
+    style_name = style.name if style else "unknown"
+    style_display = style.display_name if style else "unknown"
     counts = haiku_counts(result.haiku.splitlines()) if result.haiku else []
+    pool = ", ".join(f"`{n}`" for n in enabled_names())
+    if result.style_selection == "cli":
+        pick_line = f"`--style {style_name}`"
+    elif result.style_seed is not None:
+        pick_line = f"random among enabled ({pool}), `--seed {result.style_seed}`"
+    else:
+        pick_line = f"random among enabled ({pool})"
+    voice = result.voice
+    if voice is not None:
+        mode_name = voice.mode.name
+        mode_display = voice.mode.display_name
+        mode_heat = voice.mode.heat
+        mode_reason = voice.reason
+        if voice.selection == "cli":
+            mode_pick_line = f"`--mode {mode_name}`"
+        elif voice.selection == "random":
+            mode_pick_line = "random among all five modes (weather unavailable)"
+        else:
+            mode_pick_line = "weather map (Imagine style is separate)"
+    else:
+        mode_name = "unknown"
+        mode_display = "unknown"
+        mode_heat = "?"
+        mode_reason = "mode was not chosen this run"
+        mode_pick_line = "n/a"
     lines = [
         f"# Daily Haiku Toast — {result.date_line}",
         "",
-        f"_San Diego · {result.weekday} · board default (v1)_",
+        f"_San Diego · {result.weekday} · style `{style_name}` · mode `{mode_name}`_",
+        "",
+        "## Style",
+        "",
+        f"- **Chosen:** `{style_name}` — {style_display}",
+        f"- **Selection:** {pick_line}",
+        "",
+        "## Voice mode",
+        "",
+        f"- **Chosen:** `{mode_name}` — {mode_display} (heat {mode_heat})",
+        f"- **Selection:** {mode_pick_line}",
+        f"- **Reason:** {mode_reason}",
         "",
         "## Haiku",
         "",
@@ -192,15 +272,11 @@ def render_report(result: RunResult) -> str:
         f"- **Weather:** {weather.seed_line()}",
         f"- **Source:** {weather.source} ({weather.source_url}) — high/low °F + one condition word. Not a weather product.",
         "",
-        "## Syllables (cheap heuristic)",
+        "## Syllables (optional heuristic)",
         "",
-        f"- Count: `{counts_label(counts) or 'n/a'}`  (target 5-7-5)",
+        f"- Count: `{counts_label(counts) or 'n/a'}` — report-only, not a gate.",
     ]
     if write is not None:
-        if write.regenerated:
-            lines.append("- Regenerated once after the first pass looked way off.")
-        if write.way_off:
-            lines.append("- Still way off after one retry — kept as-is (soft fail).")
         if write.model:
             lines.append(f"- Chat model: `{write.model}`")
         if write.error:
@@ -215,7 +291,7 @@ def render_report(result: RunResult) -> str:
         imagine_status = "skipped / failed"
     lines += [
         "",
-        "## Imagine prompt (board default — locked template, `{HAIKU}` only)",
+        f"## Imagine prompt (`{style_name}` — catalog template, `{{HAIKU}}` only)",
         "",
         "```",
         result.imagine_prompt.rstrip(),
@@ -247,12 +323,12 @@ def render_report(result: RunResult) -> str:
         "",
         "## Later (not v1)",
         "",
-        "- Site / Notion post, daily auto-X, physical toaster, toast agent, style roulette.",
-        f"- {PLATE_COFFEE_NOTE}",
+        "- Site / Notion post, daily auto-X, physical toaster, toast agent.",
+        f"- {FUTURE_STYLES_NOTE}",
         "",
         "---",
         "",
-        "_Daily Haiku Toast MVP — board style. Voice brief locked._",
+        "_Daily Haiku Toast — local style catalog + Poetess Ann voice seed. Heat 0–2._",
         "",
     ]
     return "\n".join(lines)
@@ -319,9 +395,20 @@ def run(argv: Optional[List[str]] = None) -> int:
     date_line = format_date_line(when)
     weekday = when.strftime("%A")
 
+    try:
+        style = choose_style(name=args.style, seed=args.seed)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    style_selection = "cli" if args.style else "random"
+
     print("Daily Haiku Toast  ·  San Diego morning scrap, burned into crust")
     print(f"  {date_line}  ({SAN_DIEGO_TZ})")
-    print()
+    if style_selection == "cli":
+        print(f"  Style: {style.name}  (--style)")
+    elif args.seed is not None:
+        print(f"  Style: {style.name}  (random, seed={args.seed})")
+    else:
+        print(f"  Style: {style.name}  (random among {', '.join(enabled_names())})")
 
     if args.no_weather:
         weather = WeatherSeed(ok=False, error="--no-weather")
@@ -330,6 +417,17 @@ def run(argv: Optional[List[str]] = None) -> int:
         print("Fetching thin San Diego seed from Open-Meteo…")
         weather = fetch_san_diego_weather()
         print(f"  {weather.seed_line()}")
+
+    try:
+        voice = choose_mode(
+            weather,
+            name=args.mode,
+            hour=when.hour,
+            seed=None if args.mode else args.seed,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(f"  Mode: {voice.mode.name}  ({voice.reason})")
     print()
 
     key = resolve_api_key()
@@ -349,12 +447,12 @@ def run(argv: Optional[List[str]] = None) -> int:
         haiku = KEEPER_SAMPLE_HAIKU
         if args.dry_run:
             notes.append("Dry-run: sample keeper haiku, no chat call.")
-            print("Dry-run. Using the board-keeper sample haiku (no chat call).\n")
+            print("Dry-run. Using the keeper sample haiku (no chat call).\n")
         else:
             notes.append("No XAI_API_KEY — prompt-only. Sample keeper haiku filled in.")
             print(
                 "No XAI_API_KEY. Prompt-only path. "
-                "Filling the locked template with the board-keeper sample.\n"
+                "Filling the chosen style template with the keeper sample.\n"
             )
     else:
         print("XAI_API_KEY found. Asking the writer for this morning's scrap…")
@@ -362,21 +460,19 @@ def run(argv: Optional[List[str]] = None) -> int:
             date_line=date_line,
             weekday_vibe=weekday_vibe(weekday),
             weather_seed=weather.seed_line(),
+            mode_name=voice.mode.name,
+            mode_heat=voice.mode.heat,
+            mode_hint=voice.mode.hint,
             api_key=key,
         )
         if not write.ok:
             print(f"  Writer failed: {write.error}")
-            print("  Falling back to the board-keeper sample so Imagine can still run.\n")
+            print("  Falling back to the keeper sample so Imagine can still run.\n")
             haiku = KEEPER_SAMPLE_HAIKU
             notes.append(f"Writer failed ({write.error}); used keeper sample.")
         else:
             haiku = write.haiku
             wrote_live = True
-            print(f"  Syllables: {counts_label(write.counts)}  (target 5-7-5)")
-            if write.regenerated:
-                print("  Regenerated once (heuristic was way off).")
-            if write.way_off:
-                print("  Still way off after one retry — keeping it (soft fail).")
             print()
 
     print("─" * 56)
@@ -385,9 +481,9 @@ def run(argv: Optional[List[str]] = None) -> int:
     print(haiku)
     print()
 
-    imagine_prompt = fill_imagine_prompt(haiku)
+    imagine_prompt = fill_imagine_prompt(haiku, style)
     print("─" * 56)
-    print("IMAGINE PROMPT  (board default · locked · {HAIKU} only)")
+    print(f"IMAGINE PROMPT  ({style.name} · catalog · {{HAIKU}} only)")
     print("─" * 56)
     print(imagine_prompt)
     print()
@@ -401,6 +497,9 @@ def run(argv: Optional[List[str]] = None) -> int:
             date_line=date_line,
             weekday_vibe=weekday_vibe(weekday),
             weather_seed=weather.seed_line(),
+            mode_name=voice.mode.name,
+            mode_heat=voice.mode.heat,
+            mode_hint=voice.mode.hint,
         )
         notes.append("Writer system brief + user seed saved in this report's notes.")
         print("─" * 56)
@@ -446,6 +545,10 @@ def run(argv: Optional[List[str]] = None) -> int:
         dry=dry,
         wrote_live=wrote_live,
         imagined=imagined,
+        style=style,
+        style_selection=style_selection,
+        style_seed=None if args.style else args.seed,
+        voice=voice,
         image_url=image_url,
         notes=notes,
         write=write,
@@ -463,7 +566,7 @@ def run(argv: Optional[List[str]] = None) -> int:
     print(f"Report → {artifacts.report_path}")
     if artifacts.image_path:
         print(f"Image  → {artifacts.image_path}")
-    print("Board default locked. Plate-with-coffee is a later A/B.")
+    print(f"Style `{style.name}` · mode `{voice.mode.name}`.")
     print("─" * 56)
     return 0
 
