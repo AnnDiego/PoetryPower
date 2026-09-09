@@ -158,6 +158,7 @@ class DateAndDryRunTests(unittest.TestCase):
             self.assertIn("Open-Meteo", report)
             self.assertIn("sassy-tender", report)
             self.assertIn("Dry run: **yes**", report)
+            self.assertIn("Imagine: **skipped (dry / no key)**", report)
             # Heading mentions the placeholder; the filled prompt must not.
             prompt_block = report.split("```", 2)[1]
             self.assertNotIn("{HAIKU}", prompt_block)
