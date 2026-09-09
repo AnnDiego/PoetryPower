@@ -1,9 +1,8 @@
 """
-xAI chat/completions writer for one English 5-7-5.
+xAI chat/completions writer for one short three-line haiku.
 
 Reuses the visualizer's .env / XAI_API_KEY loading. Does not call
-poem_analyzer or poem_fortune. Soft-fails: one regenerate if the
-syllable heuristic is way off, then keep whatever we have.
+poem_analyzer or poem_fortune. One chat call; no syllable retry.
 """
 
 from __future__ import annotations
@@ -12,13 +11,8 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from .prompts import VOICE_BRIEF, rewrite_user_prompt, writer_user_prompt
-from .syllables import (
-    counts_label,
-    haiku_counts,
-    is_way_off,
-    parse_haiku,
-)
+from .prompts import VOICE_BRIEF, writer_user_prompt
+from .syllables import haiku_counts, parse_haiku
 
 # Same host family as Imagine. Chat model is overridable.
 DEFAULT_CHAT_URL = "https://api.x.ai/v1/chat/completions"
@@ -30,8 +24,6 @@ class WriteResult:
     haiku: str
     lines: List[str]
     counts: List[int]
-    regenerated: bool = False
-    way_off: bool = False
     model: str = ""
     error: Optional[str] = None
     raw_replies: List[str] = field(default_factory=list)
@@ -110,10 +102,7 @@ def write_haiku(
     weather_seed: str,
     api_key: Optional[str] = None,
 ) -> WriteResult:
-    """
-    Call chat/completions. Regenerate once if the heuristic is way off.
-    Never loops forever.
-    """
+    """One chat/completions call. Keep the first parsed three lines."""
     key = (api_key if api_key is not None else resolve_api_key()).strip()
     if not key:
         return WriteResult(
@@ -129,7 +118,6 @@ def write_haiku(
         weather_seed=weather_seed,
     )
     model = chat_model()
-    replies: List[str] = []
 
     try:
         first = _chat_complete(api_key=key, user_text=user_text)
@@ -142,28 +130,11 @@ def write_haiku(
             error=str(exc),
         )
 
-    replies.append(first)
     lines, haiku = parse_haiku(first)
-    regenerated = False
-
-    if is_way_off(lines):
-        rewrite = rewrite_user_prompt(haiku or first.strip(), counts_label(haiku_counts(lines)))
-        try:
-            second = _chat_complete(api_key=key, user_text=rewrite)
-            replies.append(second)
-            lines, haiku = parse_haiku(second)
-            regenerated = True
-        except Exception:
-            # Keep the first attempt if the rewrite call fails.
-            pass
-
-    counts = haiku_counts(lines)
     return WriteResult(
         haiku=haiku,
         lines=lines,
-        counts=counts,
-        regenerated=regenerated,
-        way_off=is_way_off(lines),
+        counts=haiku_counts(lines),
         model=model,
-        raw_replies=replies,
+        raw_replies=[first],
     )

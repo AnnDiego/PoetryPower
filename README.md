@@ -17,7 +17,7 @@ Run from the repo root (with venv activated):
 python -m scripts.poem_visualizer.visualizer
 
 ### haiku_toast
-Daily Haiku Toast. San Diego date + a thin weather seed → one English 5-7-5 in Ann’s voice → Grok Imagine still of toast with the haiku burned into the crust.
+Daily Haiku Toast. San Diego date + a thin weather seed → one short three-line haiku in Ann’s voice → Grok Imagine still of toast with the haiku burned into the crust. Prefer a nice morning scrap over a counted 5-7-5.
 
 Each run picks one **enabled Imagine style** from a small catalog local to this package (not the `styles/` visualizer catalog). Default is random among enabled styles; pass `--seed` to reproduce a pick, or `--style` to force one.
 

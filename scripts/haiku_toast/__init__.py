@@ -1,7 +1,7 @@
 """
 haiku_toast — Daily Haiku Toast.
 
-San Diego date + thin weather seed → one English 5-7-5 in Ann's voice
+San Diego date + thin weather seed → one short three-line haiku in Ann's voice
 → Grok Imagine still of toast with the haiku burned into the crust.
 Imagine style is picked from the local catalog (random among enabled,
 or --style).

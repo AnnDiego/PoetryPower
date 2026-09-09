@@ -22,7 +22,6 @@ __all__ = [
     "FUTURE_STYLES_NOTE",
     "fill_imagine_prompt",
     "writer_user_prompt",
-    "rewrite_user_prompt",
 ]
 
 # Ann-approved voice brief (embed in the chat writer as-is).
@@ -68,16 +67,7 @@ def writer_user_prompt(
         f"- Weekday vibe: {weekday_vibe}\n"
         f"- Weather seed: {weather_seed}\n"
         "\n"
-        "Write one English 5-7-5 haiku for this morning. "
+        "Write one short English three-line haiku for this morning — "
+        "a morning scrap, not a counted 5-7-5. "
         "Output ONLY the three lines. No title, no quotes, no commentary."
-    )
-
-
-def rewrite_user_prompt(previous: str, counts_label: str) -> str:
-    """One-shot regenerate when the syllable heuristic is way off."""
-    return (
-        f"Your last haiku was not close to English 5-7-5 "
-        f"(heuristic counted {counts_label}):\n\n"
-        f"{previous}\n\n"
-        "Rewrite once as English 5-7-5. Output ONLY the three lines."
     )
