@@ -17,9 +17,11 @@ Run from the repo root (with venv activated):
 python -m scripts.poem_visualizer.visualizer
 
 ### haiku_toast
-Daily Haiku Toast. San Diego date + a thin weather seed → one short three-line haiku in Ann’s voice → Grok Imagine still of toast with the haiku burned into the crust. Prefer a nice morning scrap over a counted 5-7-5.
+Daily Haiku Toast. San Diego date + a thin weather seed → one short three-line haiku in Ann’s locked Poetess voice → Grok Imagine still of toast with the haiku burned into the crust. Prefer a nice morning scrap over a counted 5-7-5. Heat ceiling 0–2.
 
-Each run picks one **enabled Imagine style** from a small catalog local to this package (not the `styles/` visualizer catalog). Default is random among enabled styles; pass `--seed` to reproduce a pick, or `--style` to force one.
+Each run picks one **voice mode** from the weather seed (or `--mode`) and one **Imagine style** from a small catalog local to this package (not the `styles/` visualizer catalog). Style roulette and voice mode are separate. Default style is random among enabled; pass `--seed` to reproduce random picks, or `--style` / `--mode` to force one.
+
+Locked voice seed: `scripts/haiku_toast/VOICE_SEED.md` (loaded as the writer system brief). Modes: `verdant`, `starlit_dawn`, `tender`, `picnic_wink`, `soft_weather_soul`.
 
 Enabled now:
 - `buttered` — rustic wooden board, melting butter on the toast (board default evolution). Keeper: `scripts/haiku_toast/examples/buttered.jpg`
@@ -33,11 +35,12 @@ python -m scripts.haiku_toast --dry-run
 python -m scripts.haiku_toast --style buttered
 python -m scripts.haiku_toast --style toaster_popup
 python -m scripts.haiku_toast --seed 17
+python -m scripts.haiku_toast --mode verdant
 
 - No `XAI_API_KEY`: prompt-only (writer seed + chosen style template, keeper sample haiku).
 - With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`.
 - Weather: Open-Meteo (https://open-meteo.com/) high/low °F + one condition word for downtown San Diego. Not a weather product.
-- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when Imagine succeeds). The report records which style was chosen. Generated images are gitignored.
+- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when Imagine succeeds). The report records Imagine style, voice mode, and the weather→mode reason. Generated images are gitignored.
 - Site posting, daily auto-X, Notion, and a physical toaster are follow-ups — not in this runner.
 
 Imagine templates (replace `{HAIKU}` only) live in `scripts/haiku_toast/style_catalog.py`. Both enabled templates require exactly three lines and letters that follow the crumb as Maillard browning, not printed ink.
