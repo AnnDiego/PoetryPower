@@ -44,6 +44,7 @@ HYBRID_TEMP_F = 72
 CLEAR_HOT_TEMP_F = 75
 
 STATE_FILENAME = ".last_drawer.json"
+RECENT_HISTORY_N = 5
 
 _STOP = frozenset(
     {
@@ -66,6 +67,89 @@ _STOP = frozenset(
         "still",
     }
 )
+
+# Soft-nature body/earth cluster Ann flagged as samey (toes + clover,
+# mist + pane + clover). One of these per scrap unless the required
+# tell already names more than one (hybrid pane/toes).
+SOFT_NATURE_BODY = frozenset(
+    {
+        "mist",
+        "fog",
+        "clover",
+        "peat",
+        "pane",
+        "moss",
+        "tendril",
+        "tendrils",
+        "toe",
+        "toes",
+        "shroud",
+        "marine",
+    }
+)
+_SOFT_NATURE_CANON = {"toe": "toes", "tendril": "tendrils"}
+
+# Too common to treat as a "signature noun" across mornings.
+_GENERIC_SIGNATURE = frozenset(
+    {
+        "sun",
+        "day",
+        "dawn",
+        "morning",
+        "light",
+        "sky",
+        "first",
+        "finds",
+        "still",
+        "heat",
+        "gold",
+        "gray",
+        "grey",
+        "will",
+        "that",
+        "this",
+        "through",
+        "promise",
+        "considering",
+        "breaking",
+        "clothes",
+    }
+)
+
+# Drawers that may stay nature-forward. Still no earth-body pile-on.
+NATURE_ONLY_DRAWERS = frozenset(
+    {
+        DRAWER_FOG,
+        DRAWER_OVERCAST,
+        DRAWER_RAIN,
+        DRAWER_HYBRID,
+        DRAWER_STARLIT,
+    }
+)
+
+# Motif tags for rolling skip. Only soft_earth is "samey" across days.
+MOTIF_TAG_WORDS = {
+    "soft_earth": frozenset(
+        {
+            "mist",
+            "fog",
+            "clover",
+            "peat",
+            "moss",
+            "pane",
+            "shroud",
+            "marine",
+            "tendril",
+            "tendrils",
+        }
+    ),
+    "body_path": frozenset({"toes", "toe", "hips", "forehead", "nape", "cheek"}),
+    "picnic": frozenset({"brie", "coffee", "checkered", "cloth", "taco", "pillow"}),
+    "gold_light": frozenset({"buttery", "gold", "photons", "pearl", "luminous"}),
+    "celestial": frozenset({"moon", "venus", "stars", "crescent", "saucer"}),
+    "rain_song": frozenset({"rain", "drum", "chime", "chimes", "roof"}),
+}
+SAMEY_MOTIFS = frozenset({"soft_earth"})
 
 
 @dataclass(frozen=True)
@@ -242,6 +326,8 @@ class DrawerDecision:
     tell: str = ""
     yesterday_tell: Optional[str] = None
     yesterday_drawer: Optional[str] = None
+    avoided_tells: Tuple[str, ...] = ()
+    recent_nouns: Tuple[str, ...] = ()
 
     @property
     def name(self) -> str:
@@ -257,10 +343,30 @@ class LastDrawer:
     date: str
     drawer: str
     tell: str
+    motifs: Tuple[str, ...] = ()
+    key_words: Tuple[str, ...] = ()
+    history: Tuple["LastDrawer", ...] = ()
 
 
 def last_drawer_path(out_dir: Path) -> Path:
     return Path(out_dir) / STATE_FILENAME
+
+
+def _memory_from_dict(data: dict) -> Optional[LastDrawer]:
+    date = data.get("date")
+    drawer = data.get("drawer")
+    tell = data.get("tell")
+    if not date or not drawer or not tell:
+        return None
+    motifs = data.get("motifs") or ()
+    key_words = data.get("key_words") or ()
+    return LastDrawer(
+        date=str(date),
+        drawer=str(drawer),
+        tell=str(tell),
+        motifs=tuple(str(m) for m in motifs),
+        key_words=tuple(str(w) for w in key_words),
+    )
 
 
 def load_last_drawer(out_dir: Path) -> Optional[LastDrawer]:
@@ -271,12 +377,28 @@ def load_last_drawer(out_dir: Path) -> Optional[LastDrawer]:
         return None
     if not isinstance(data, dict):
         return None
-    date = data.get("date")
-    drawer = data.get("drawer")
-    tell = data.get("tell")
-    if not date or not drawer or not tell:
+    latest = _memory_from_dict(data)
+    if latest is None:
         return None
-    return LastDrawer(date=str(date), drawer=str(drawer), tell=str(tell))
+    history: List[LastDrawer] = []
+    for item in data.get("history") or []:
+        if not isinstance(item, dict):
+            continue
+        mem = _memory_from_dict(item)
+        if mem is not None:
+            history.append(mem)
+    latest.history = tuple(history)
+    return latest
+
+
+def _memory_to_dict(mem: LastDrawer) -> dict:
+    return {
+        "date": mem.date,
+        "drawer": mem.drawer,
+        "tell": mem.tell,
+        "motifs": list(mem.motifs),
+        "key_words": list(mem.key_words),
+    }
 
 
 def save_last_drawer(
@@ -285,13 +407,25 @@ def save_last_drawer(
     date: str,
     drawer: str,
     tell: str,
+    haiku: str = "",
+    previous: Optional[LastDrawer] = None,
 ) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = last_drawer_path(out_dir)
+    key_words = extract_key_words(tell, haiku)
+    motifs = motif_tags_for_text(f"{tell}\n{haiku}")
+    history = [_memory_to_dict(mem) for mem in prior_mornings(previous, date)]
     path.write_text(
         json.dumps(
-            {"date": date, "drawer": drawer, "tell": tell},
+            {
+                "date": date,
+                "drawer": drawer,
+                "tell": tell,
+                "motifs": list(motifs),
+                "key_words": list(key_words),
+                "history": history,
+            },
             indent=2,
         )
         + "\n",
@@ -308,6 +442,66 @@ def yesterday_note(
     if last is None or last.date >= today:
         return None, None
     return last.drawer, last.tell
+
+
+def prior_mornings(
+    last: Optional[LastDrawer],
+    today: str,
+    *,
+    n: int = RECENT_HISTORY_N,
+) -> List[LastDrawer]:
+    """Prior mornings (not today), newest first, capped at *n*."""
+    if last is None:
+        return []
+    rows: List[LastDrawer] = []
+    if last.date < today:
+        rows.append(
+            LastDrawer(
+                date=last.date,
+                drawer=last.drawer,
+                tell=last.tell,
+                motifs=last.motifs,
+                key_words=last.key_words,
+            )
+        )
+    for mem in last.history:
+        if mem.date < today:
+            rows.append(
+                LastDrawer(
+                    date=mem.date,
+                    drawer=mem.drawer,
+                    tell=mem.tell,
+                    motifs=mem.motifs,
+                    key_words=mem.key_words,
+                )
+            )
+    seen = set()
+    out: List[LastDrawer] = []
+    for mem in rows:
+        if mem.date in seen:
+            continue
+        seen.add(mem.date)
+        out.append(mem)
+    return out[:n]
+
+
+def recent_signature_nouns(recent: Sequence[LastDrawer]) -> List[str]:
+    """Distinct tell tokens + key words from recent mornings (no motif tags)."""
+    out: List[str] = []
+    seen = set()
+    tag_names = set(MOTIF_TAG_WORDS)
+    for mem in recent:
+        for word in (*tell_tokens(mem.tell), *mem.key_words):
+            if (
+                word in seen
+                or word in tag_names
+                or word in _STOP
+                or word in _GENERIC_SIGNATURE
+            ):
+                continue
+            seen.add(word)
+            out.append(word)
+    return out
 
 
 def _code(weather: WeatherSeed) -> Optional[int]:
@@ -562,14 +756,36 @@ def choose_tell(
     *,
     yesterday_drawer: Optional[str] = None,
     yesterday_tell: Optional[str] = None,
+    recent: Optional[Sequence[LastDrawer]] = None,
     rng: Optional[random.Random] = None,
 ) -> str:
     """
-    One tell from the drawer. If the drawer changed, do not reuse
-    yesterday's tell. Same-drawer reuse is allowed.
+    One tell from the drawer. Skip yesterday's tell when the drawer
+    changed, and skip tells that collide with recent mornings when
+    another tell in this drawer is still available.
     """
+    tell, _skipped = choose_tell_filtered(
+        spec,
+        yesterday_drawer=yesterday_drawer,
+        yesterday_tell=yesterday_tell,
+        recent=recent,
+        rng=rng,
+    )
+    return tell
+
+
+def choose_tell_filtered(
+    spec: DrawerSpec,
+    *,
+    yesterday_drawer: Optional[str] = None,
+    yesterday_tell: Optional[str] = None,
+    recent: Optional[Sequence[LastDrawer]] = None,
+    rng: Optional[random.Random] = None,
+) -> Tuple[str, List[str]]:
+    """Return (tell, skipped tells) after applying anti-repetition filters."""
     chooser = rng or random.Random()
-    tells: Sequence[str] = spec.tells
+    tells = list(spec.tells)
+    skipped: List[str] = []
     changed = (
         yesterday_drawer is not None
         and yesterday_drawer != spec.name
@@ -578,8 +794,15 @@ def choose_tell(
     if changed:
         filtered = [t for t in tells if t != yesterday_tell]
         if filtered:
+            if yesterday_tell in tells:
+                skipped.append(yesterday_tell)
             tells = filtered
-    return chooser.choice(list(tells))
+    if recent:
+        kept = [t for t in tells if not tell_collides_with_recent(t, recent)]
+        if kept:
+            skipped.extend(t for t in tells if t not in kept)
+            tells = kept
+    return chooser.choice(tells), skipped
 
 
 def attach_tell(
@@ -587,17 +810,21 @@ def attach_tell(
     *,
     yesterday_drawer: Optional[str] = None,
     yesterday_tell: Optional[str] = None,
+    recent: Optional[Sequence[LastDrawer]] = None,
     rng: Optional[random.Random] = None,
 ) -> DrawerDecision:
-    tell = choose_tell(
+    tell, skipped = choose_tell_filtered(
         decision.spec,
         yesterday_drawer=yesterday_drawer,
         yesterday_tell=yesterday_tell,
+        recent=recent,
         rng=rng,
     )
     decision.tell = tell
     decision.yesterday_drawer = yesterday_drawer
     decision.yesterday_tell = yesterday_tell
+    decision.avoided_tells = tuple(skipped)
+    decision.recent_nouns = tuple(recent_signature_nouns(recent or ()))
     return decision
 
 
@@ -610,6 +837,128 @@ def tell_tokens(tell: str) -> List[str]:
             continue
         kept.append(word)
     return kept
+
+
+def _all_tell_words() -> frozenset:
+    words: set = set()
+    for spec in DRAWERS.values():
+        for tell in spec.tells:
+            words.update(tell_tokens(tell))
+    words.update(SOFT_NATURE_BODY)
+    return frozenset(words)
+
+
+_ALL_TELL_WORDS: Optional[frozenset] = None
+
+
+def all_tell_words() -> frozenset:
+    global _ALL_TELL_WORDS
+    if _ALL_TELL_WORDS is None:
+        _ALL_TELL_WORDS = _all_tell_words()
+    return _ALL_TELL_WORDS
+
+
+def soft_nature_hits(text: str) -> List[str]:
+    """Canonical soft-nature body/earth tokens found in *text*."""
+    words = re.findall(r"[a-zA-Z']+", text.lower())
+    hits: List[str] = []
+    seen = set()
+    for word in words:
+        word = word.replace("'", "")
+        canon = _SOFT_NATURE_CANON.get(word, word)
+        if canon in SOFT_NATURE_BODY and canon not in seen:
+            seen.add(canon)
+            hits.append(canon)
+    return hits
+
+
+def soft_nature_doubledip(haiku: str, tell: str = "") -> bool:
+    """
+    True when the scrap stacks two near-identical earth-body tells.
+
+    The required tell may already name more than one (hybrid pane/toes).
+    Extra cluster members beyond max(1, hits-in-tell) are a pile-on.
+    """
+    scrap = soft_nature_hits(haiku)
+    tell_hits = soft_nature_hits(tell)
+    allowed = max(1, len(tell_hits))
+    return len(scrap) > allowed
+
+
+def motif_tags_for_text(text: str) -> Tuple[str, ...]:
+    tokens = set(tell_tokens(text))
+    tokens.update(soft_nature_hits(text))
+    tags = []
+    for tag, words in MOTIF_TAG_WORDS.items():
+        if tokens & words:
+            tags.append(tag)
+    return tuple(tags)
+
+
+def extract_key_words(tell: str, haiku: str = "") -> Tuple[str, ...]:
+    """Signature nouns: distinctive tell tokens + soft-nature hits."""
+    allowed = all_tell_words()
+    out: List[str] = []
+    seen = set()
+    for word in (*tell_tokens(tell), *tell_tokens(haiku), *soft_nature_hits(haiku)):
+        if word in seen or word in _GENERIC_SIGNATURE:
+            continue
+        if word in SOFT_NATURE_BODY or word in allowed:
+            seen.add(word)
+            out.append(word)
+    return tuple(out)
+
+
+def tell_collides_with_recent(
+    tell: str,
+    recent: Sequence[LastDrawer],
+) -> bool:
+    """True when this tell reuses a recent tell, noun, or samey motif."""
+    if not recent:
+        return False
+    tell_l = tell.lower()
+    tokens = {w for w in tell_tokens(tell) if w not in _GENERIC_SIGNATURE}
+    tell_soft = set(soft_nature_hits(tell))
+    recent_tokens: set = set()
+    recent_soft = False
+    for mem in recent:
+        if mem.tell and mem.tell.lower() == tell_l:
+            return True
+        recent_tokens.update(
+            w for w in tell_tokens(mem.tell) if w not in _GENERIC_SIGNATURE
+        )
+        recent_tokens.update(
+            w for w in mem.key_words if w not in _GENERIC_SIGNATURE
+        )
+        if SAMEY_MOTIFS & set(mem.motifs) or soft_nature_hits(mem.tell):
+            recent_soft = True
+        if set(mem.key_words) & SOFT_NATURE_BODY:
+            recent_soft = True
+    if tokens & recent_tokens:
+        return True
+    if recent_soft and tell_soft:
+        return True
+    return False
+
+
+def recent_noun_reuse(
+    haiku: str,
+    tell: str,
+    recent_nouns: Sequence[str],
+) -> List[str]:
+    """Recent signature nouns that appear in the scrap but not today's tell."""
+    if not recent_nouns:
+        return []
+    blob = haiku.lower()
+    protected = set(tell_tokens(tell)) | set(soft_nature_hits(tell))
+    allowed = all_tell_words()
+    reused: List[str] = []
+    for noun in recent_nouns:
+        if noun in protected or noun not in allowed or len(noun) < 4:
+            continue
+        if re.search(rf"\b{re.escape(noun)}\b", blob):
+            reused.append(noun)
+    return reused
 
 
 def haiku_has_tell(haiku: str, tell: str) -> bool:
@@ -639,6 +988,8 @@ def drawer_voice_problems(
     haiku: str,
     spec: DrawerSpec,
     tell: str,
+    *,
+    recent_nouns: Optional[Sequence[str]] = None,
 ) -> List[str]:
     """Reasons the writer should reject/regenerate this scrap."""
     problems: List[str] = []
@@ -656,4 +1007,14 @@ def drawer_voice_problems(
         # on a clear sky should not reach for mist-clover-as-weather.
         if spec.name == DRAWER_CLEAR_MILD and _FOG_LEX.search(haiku):
             problems.append("clear drawer + fog lexicon")
+    if soft_nature_doubledip(haiku, tell):
+        problems.append(
+            "soft-nature body/earth double-dip "
+            "(toes + clover, or mist + pane + clover pile-on)"
+        )
+    reused = recent_noun_reuse(haiku, tell, recent_nouns or ())
+    if reused:
+        problems.append(
+            "repeats recent morning noun (" + ", ".join(reused) + ")"
+        )
     return problems

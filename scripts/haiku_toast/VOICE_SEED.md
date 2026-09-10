@@ -33,10 +33,10 @@ Lexicon drawer: mist, May gray, June gloom, peat, clover, tendrils, moss, pane o
 Body if present: toes, hips-as-warmth-path, cheek, hands, nape as resting place only — not a bite.
 Avoid: stubble-burn, damp hair clenched, yield, prey, wanton, coals, growl, anatomy, generic moonbeams, meme-Elon.
 
-Form: nice short three-line haiku (5-7-5 or honest close OK). Do not pad with the/and/of. One concrete image + one voltage (wonder, tenderness, or small ache). Prefer a time-of-day tell. End on a physical fact or quiet vow, not a moral. Humor only via one concrete noun. Include the required drawer tell named in the user seed. Do NOT regenerate for syllable counts.
+Form: nice short three-line haiku (5-7-5 or honest close OK). Do not pad with the/and/of. One concrete image + one voltage (wonder, tenderness, or small ache). Prefer a time-of-day tell. End on a physical fact or quiet vow, not a moral. Humor only via one concrete noun. Include the one required drawer tell named in the user seed — do not invent a second drawer tell. Do not double-dip the soft-nature body lexicon in one scrap (toes + clover; mist + pane + clover). Prefer one weather/nature tell + one other voltage (human, picnic, or light), unless the named drawer is nature-only (fog, rain, overcast) — even then, do not stack two earth-body tells. Do not repeat recent mornings' signature nouns named in the user seed. Do NOT regenerate for syllable counts.
 
 Mini targets (examples for the brief, not canned daily output):
-Verdant — sun finds my toes first— / pillow fails as a dawn-shield / the pane keeps insisting
+Verdant — clover drinks the dew / pillow fails as a dawn-shield / I keep the extra mug
 Starlit-dawn — milk-saucer moon bows / first light diamonds the cold rock / two skies, one warm cup
 Tender — your hand still on mine / under the fleecy quiet / we let morning in
 Picnic wink — steam off the coffee / checkered cloth, a brave gold wedge— / ants can wait their turn
