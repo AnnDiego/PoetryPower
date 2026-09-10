@@ -19,7 +19,8 @@ Flow:
   → pick an enabled Imagine style (random, or --style / --seed)
   → optional Grok Imagine stills (reuses poem_visualizer.ImagineClient;
     several candidates, keep the most legible burn-in)
-  → save haiku.txt + report.md + image (when a still passes)
+  → if Imagine fails or no still passes: ship the canned avocado still
+  → save haiku.txt + report.md + image (keeper or avocado fallback)
 
 Site posting / daily X / Notion / physical toaster: not in v1.
 """
@@ -78,6 +79,12 @@ from scripts.poem_visualizer.imagine_client import MAX_IMAGE_N
 DEFAULT_IMAGINE_N = 4
 MAX_IMAGINE_N = MAX_IMAGE_N
 
+# Ann's locked Imagine-fail still (Canva Oopsie). Not an enabled catalog style.
+# Copy bytes only — never burn haiku into the crust, never recompress.
+FALLBACK_STILL_PATH = (
+    Path(__file__).resolve().parent / "assets" / "avocado-toast-4x3.png"
+)
+
 
 @dataclass
 class RunArtifacts:
@@ -106,6 +113,7 @@ class RunResult:
     imagine_n: int = 4
     imagine_tried: int = 0
     imagine_kept: Optional[int] = None
+    imagine_fallback: bool = False
     notes: List[str] = field(default_factory=list)
     artifacts: Optional[RunArtifacts] = None
     write: Optional[WriteResult] = None
@@ -211,7 +219,8 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         help=(
             "How many Imagine stills to request and score for the same "
             f"prompt (default {DEFAULT_IMAGINE_N}, max {MAX_IMAGINE_N}). "
-            "Keeps the most legible burn-in; ships nothing if all fail."
+            "Keeps the most legible burn-in; on total fail, ships the "
+            "canned avocado still."
         ),
     )
     return p.parse_args(argv)
@@ -340,7 +349,9 @@ def render_report(result: RunResult) -> str:
             lines.append(f"- Writer: {write.error}")
     if result.dry:
         lines.append("- Dry / no-key path: live writer was not called.")
-    if result.imagined:
+    if result.imagine_fallback:
+        imagine_status = "fallback (canned avocado still)"
+    elif result.imagined:
         imagine_status = "ok"
     elif result.dry:
         imagine_status = "skipped (dry / no key)"
@@ -364,10 +375,28 @@ def render_report(result: RunResult) -> str:
     ]
     if result.image_url:
         lines.append(f"- Image URL: {result.image_url}")
+    if result.imagine_fallback:
+        lines.append(
+            "- Fallback: **yes** — canned avocado still from "
+            "`scripts/haiku_toast/assets/avocado-toast-4x3.png`. "
+            "No burn-in, no invented crust lettering."
+        )
     if result.dry:
         lines.append(
             f"- Imagine candidates: {result.imagine_n} would be requested "
-            f"(`--imagine-n`; live runs score burn-in and keep one or fail)"
+            f"(`--imagine-n`; live runs score burn-in and keep one or "
+            "fall back to the canned avocado still)"
+        )
+    elif result.imagine_fallback and result.imagine_tried:
+        lines.append(
+            f"- Imagine candidates: {result.imagine_tried} scored, "
+            f"none passed (requested {result.imagine_n}) — "
+            "shipped canned avocado still"
+        )
+    elif result.imagine_fallback:
+        lines.append(
+            f"- Imagine candidates: {result.imagine_n} requested — "
+            "Imagine failed; shipped canned avocado still"
         )
     elif result.imagine_tried:
         if result.imagine_kept:
@@ -435,6 +464,29 @@ def save_artifacts(
     result.artifacts = artifacts
     report_path.write_text(render_report(result), encoding="utf-8")
     return artifacts
+
+
+def ship_avocado_fallback(dest: Path, *, reason: str) -> tuple[Path, str]:
+    """
+    Copy Ann's canned avocado still verbatim.
+
+    No burn-in, no invented crust lettering. ``dest`` is the would-be
+    Imagine jpg; fallback writes a sibling ``.png`` so PNG bytes stay
+    uncompressed.
+    """
+    src = FALLBACK_STILL_PATH
+    if not src.is_file():
+        raise FileNotFoundError(f"Missing canned avocado still: {src}")
+    out = dest.with_suffix(".png")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(src.read_bytes())
+    why = (reason or "Imagine produced no kept still").rstrip(".")
+    note = (
+        f"Imagine fallback used: {why}. "
+        "Shipped canned avocado-toast still "
+        "(no burn-in, no invented crust lettering)."
+    )
+    return out, note
 
 
 def _maybe_imagine(
@@ -701,6 +753,7 @@ def run(argv: Optional[List[str]] = None) -> int:
     image_url: Optional[str] = None
     image_path: Optional[Path] = None
     imagined = False
+    imagine_fallback = False
     imagine_tried = 0
     imagine_kept: Optional[int] = None
     stamp = san_diego_now().strftime("%Y%m%d-%H%M")
@@ -745,7 +798,11 @@ def run(argv: Optional[List[str]] = None) -> int:
             print(f"  {note}")
             print(f"  Image saved → {image_path}\n")
         else:
-            print(f"  {note}\n")
+            image_path, fb_note = ship_avocado_fallback(pending_image, reason=note)
+            notes.append(fb_note)
+            imagine_fallback = True
+            print(f"  {fb_note}")
+            print(f"  Fallback image saved → {image_path}\n")
 
     result = RunResult(
         date_line=date_line,
@@ -764,6 +821,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         imagine_n=args.imagine_n,
         imagine_tried=imagine_tried,
         imagine_kept=imagine_kept,
+        imagine_fallback=imagine_fallback,
         notes=notes,
         write=write,
     )
