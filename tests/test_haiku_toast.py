@@ -571,6 +571,15 @@ class AntiRepetitionTests(unittest.TestCase):
         )
         self.assertTrue(any("double-dip" in p for p in problems))
 
+    def test_key_words_keep_cluster_not_generic_sun(self) -> None:
+        words = extract_key_words("clover", self.ANN_SCRAP)
+        self.assertIn("clover", words)
+        self.assertIn("toes", words)
+        self.assertIn("mist", words)
+        self.assertIn("marine", words)
+        self.assertNotIn("sun", words)
+        self.assertNotIn("gray", words)
+
     def test_single_tell_is_not_doubledip(self) -> None:
         scrap = "clover drinks the dew\npillow fails as a dawn-shield\nI keep the extra mug"
         self.assertFalse(soft_nature_doubledip(scrap, "clover"))
@@ -766,7 +775,15 @@ class AntiRepetitionTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             report = next(out.glob("*_toast.md")).read_text(encoding="utf-8")
             self.assertIn("**Avoided recent motifs:**", report)
-            self.assertIn("clover", report)
+            avoided_line = next(
+                ln for ln in report.splitlines()
+                if ln.startswith("- **Avoided recent motifs:**")
+            )
+            self.assertIn("clover", avoided_line)
+            self.assertIn("mist", avoided_line)
+            self.assertIn("toes", avoided_line)
+            self.assertNotIn("sun", avoided_line)
+            self.assertNotIn("Skipped drawer tells: clover", report)
             self.assertIn("Do not repeat recent mornings' signature nouns", report)
             state = json.loads((out / ".last_drawer.json").read_text(encoding="utf-8"))
             self.assertEqual(state["drawer"], DRAWER_CLEAR_HOT)
