@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from scripts.haiku_toast.prompts import (
@@ -14,7 +15,7 @@ from scripts.haiku_toast.prompts import (
     VOICE_SEED_PATH,
     writer_user_prompt,
 )
-from scripts.haiku_toast.runner import format_date_line, run
+from scripts.haiku_toast.runner import format_date_line, render_report, run, RunResult
 from scripts.haiku_toast.style_catalog import (
     BUTTERED_TEMPLATE,
     TOASTER_POPUP_TEMPLATE,
@@ -332,6 +333,8 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertNotIn("target 5-7-5", report)
         self.assertIn("Dry run: **yes**", report)
         self.assertIn("Imagine: **skipped (dry / no key)**", report)
+        self.assertIn("Imagine candidates: 4 would be requested", report)
+        self.assertIn("`--imagine-n`", report)
         prompt_block = report.split("```", 2)[1]
         self.assertNotIn("{HAIKU}", prompt_block)
         self.assertIn("Crisp slice, quiet dawn", prompt_block)
@@ -421,6 +424,226 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertNotIn("poem_visualizer.style_loader", src)
         self.assertTrue(hasattr(ImagineClient, "generate_image"))
         self.assertTrue(hasattr(ImagineClient, "from_env"))
+        self.assertTrue(hasattr(ImagineClient, "collect_image_urls"))
+        self.assertIn("collect_image_urls", src)
+        self.assertIn("pick_legible_still", src)
+        self.assertIn("--imagine-n", src)
+
+
+class ImagineNFlagTests(unittest.TestCase):
+    def test_imagine_n_override_appears_on_dry_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rc = run(
+                [
+                    "--dry-run",
+                    "--no-weather",
+                    "--style",
+                    "buttered",
+                    "--imagine-n",
+                    "3",
+                    "--out-dir",
+                    tmp,
+                ]
+            )
+            self.assertEqual(rc, 0)
+            report = next(Path(tmp).glob("*_toast.md")).read_text(encoding="utf-8")
+            self.assertIn("Imagine candidates: 3 would be requested", report)
+
+    def test_imagine_n_out_of_range_exits(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit) as ctx:
+                run(
+                    [
+                        "--dry-run",
+                        "--no-weather",
+                        "--imagine-n",
+                        "0",
+                        "--out-dir",
+                        tmp,
+                    ]
+                )
+            self.assertIn("--imagine-n must be between 1 and 10", str(ctx.exception))
+
+
+class LegibilityTests(unittest.TestCase):
+    """Selection helper: keeper-like misspellings pass; 2026-09-10 garbles fail."""
+
+    KEEPER = KEEPER_SAMPLE_HAIKU
+    KEEPER_BUTTERED = (
+        "Crispslice, quiet dawnn\ninkofheatwrittes seventeen\nsylllables ofgoldd"
+    )
+    KEEPER_TOASTER = (
+        "Crispslice, quiet dawnn\nink of heat writeseventeen\nsylllables of goldd"
+    )
+    GARBLED = [
+        "Maikiku,\ncheckered\nhaiku",
+        "haiku\nsoundeugh\nhoiku",
+        "Haiku baects\nno tove drink\nhaiku mistost",
+        "",
+        "hello world breakfast photo",
+    ]
+
+    def test_score_accepts_keeperish_and_rejects_garbage(self) -> None:
+        from scripts.haiku_toast.legibility import score_burn_in
+
+        self.assertTrue(score_burn_in(self.KEEPER, self.KEEPER).passed)
+        self.assertTrue(score_burn_in(self.KEEPER_BUTTERED, self.KEEPER).passed)
+        self.assertTrue(score_burn_in(self.KEEPER_TOASTER, self.KEEPER).passed)
+        for text in self.GARBLED:
+            score = score_burn_in(text, self.KEEPER)
+            self.assertFalse(score.passed, msg=repr(text))
+
+    def test_pick_keeps_best_passer_and_fails_closed(self) -> None:
+        from scripts.haiku_toast.legibility import (
+            ExtractResult,
+            StillCandidate,
+            pick_legible_still,
+        )
+
+        cands = [
+            StillCandidate(index=1, url="http://a"),
+            StillCandidate(index=2, url="http://b"),
+            StillCandidate(index=3, url="http://c"),
+        ]
+        texts = {
+            1: self.GARBLED[0],
+            2: self.KEEPER_BUTTERED,
+            3: self.GARBLED[1],
+        }
+
+        def extract(cand: StillCandidate) -> ExtractResult:
+            return ExtractResult(text=texts[cand.index], method="fake")
+
+        pick = pick_legible_still(self.KEEPER, cands, extract_fn=extract)
+        self.assertTrue(pick.ok)
+        self.assertEqual(pick.tried, 3)
+        self.assertEqual(pick.kept_index, 2)
+        self.assertIn("kept candidate #2 of 3", pick.note)
+
+        all_bad = pick_legible_still(
+            self.KEEPER,
+            cands,
+            extract_fn=lambda c: ExtractResult(text=self.GARBLED[0], method="fake"),
+        )
+        self.assertFalse(all_bad.ok)
+        self.assertIsNone(all_bad.kept)
+        self.assertIn("not shipping", all_bad.note.lower())
+        self.assertIn("garbled", all_bad.note.lower())
+
+        unread = pick_legible_still(
+            self.KEEPER,
+            cands,
+            extract_fn=lambda c: ExtractResult(
+                text="", method="none", error="no reader"
+            ),
+        )
+        self.assertFalse(unread.ok)
+        self.assertIn("could not read", unread.note)
+
+    def test_report_records_kept_and_all_failed(self) -> None:
+        weather = WeatherSeed(ok=False, error="--no-weather")
+        base = dict(
+            date_line="Wednesday, September 9, 2026",
+            weekday="Wednesday",
+            weather=weather,
+            haiku=self.KEEPER,
+            imagine_prompt="prompt",
+            dry=False,
+            wrote_live=False,
+            imagined=True,
+            imagine_n=4,
+            imagine_tried=4,
+            imagine_kept=2,
+            image_url="http://example.com/toast.jpg",
+        )
+        kept = render_report(RunResult(**base))
+        self.assertIn("Imagine: **ok**", kept)
+        self.assertIn("kept #2 of 4 requested", kept)
+
+        failed = render_report(
+            RunResult(
+                **{
+                    **base,
+                    "imagined": False,
+                    "imagine_kept": None,
+                    "image_url": None,
+                }
+            )
+        )
+        self.assertIn("Imagine: **failed (no legible burn-in)**", failed)
+        self.assertIn("none passed (requested 4) — still not shipped", failed)
+
+    def test_maybe_imagine_does_not_ship_garbage(self) -> None:
+        from scripts.haiku_toast.legibility import ExtractResult
+        from scripts.haiku_toast.runner import _maybe_imagine
+        from scripts.poem_visualizer.imagine_client import ImagineResult
+
+        client = MagicMock()
+        client.collect_image_urls.return_value = ImagineResult(
+            ok=True, url="http://a", urls=["http://a", "http://b"]
+        )
+
+        def fake_dl(url: str, path: Path) -> None:
+            path.write_bytes(b"fake-jpg")
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "20260910-0800_toast.jpg"
+            with patch(
+                "scripts.poem_visualizer.imagine_client.ImagineClient.from_env",
+                return_value=client,
+            ), patch("scripts.haiku_toast.runner._download_image", side_effect=fake_dl):
+                url, path, note, pick = _maybe_imagine(
+                    "prompt",
+                    dest,
+                    haiku=self.KEEPER,
+                    n=2,
+                    extract_fn=lambda c: ExtractResult(
+                        text="Maikiku, checkered haiku", method="fake"
+                    ),
+                )
+            self.assertIsNone(url)
+            self.assertIsNone(path)
+            self.assertFalse(dest.exists())
+            self.assertFalse(pick.ok)
+            self.assertIn("not shipping", note.lower())
+            self.assertEqual(len(list(Path(tmp).glob("*rejected*"))), 2)
+
+    def test_maybe_imagine_keeps_the_legible_draw(self) -> None:
+        from scripts.haiku_toast.legibility import ExtractResult, StillCandidate
+        from scripts.haiku_toast.runner import _maybe_imagine
+        from scripts.poem_visualizer.imagine_client import ImagineResult
+
+        client = MagicMock()
+        client.collect_image_urls.return_value = ImagineResult(
+            ok=True, url="http://a", urls=["http://a", "http://b"]
+        )
+        texts = {1: "Maikiku, checkered haiku", 2: self.KEEPER_BUTTERED}
+
+        def fake_dl(url: str, path: Path) -> None:
+            path.write_bytes(b"winner" if "cand2" in path.name else b"junk")
+            return None
+
+        def extract(cand: StillCandidate) -> ExtractResult:
+            return ExtractResult(text=texts[cand.index], method="fake")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "20260910-0800_toast.jpg"
+            with patch(
+                "scripts.poem_visualizer.imagine_client.ImagineClient.from_env",
+                return_value=client,
+            ), patch("scripts.haiku_toast.runner._download_image", side_effect=fake_dl):
+                url, path, note, pick = _maybe_imagine(
+                    "prompt", dest, haiku=self.KEEPER, n=2, extract_fn=extract
+                )
+            self.assertEqual(url, "http://b")
+            self.assertEqual(path, dest)
+            self.assertTrue(dest.is_file())
+            self.assertEqual(dest.read_bytes(), b"winner")
+            self.assertTrue(pick.ok)
+            self.assertEqual(pick.kept_index, 2)
+            self.assertIn("kept candidate #2", note)
+            self.assertFalse(list(Path(tmp).glob("*_cand*")))
 
 
 class KeeperStillsTests(unittest.TestCase):

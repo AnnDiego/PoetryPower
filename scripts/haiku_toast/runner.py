@@ -9,6 +9,7 @@ Run from repo root:
     python -m scripts.haiku_toast --style toaster_popup
     python -m scripts.haiku_toast --seed 17
     python -m scripts.haiku_toast --mode verdant
+    python -m scripts.haiku_toast --imagine-n 4
     python -m scripts.haiku_toast.runner
 
 Flow:
@@ -16,8 +17,9 @@ Flow:
   → voice mode (weather map, or --mode)
   → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
-  → optional Grok Imagine still (reuses poem_visualizer.ImagineClient)
-  → save haiku.txt + report.md + image (when generated)
+  → optional Grok Imagine stills (reuses poem_visualizer.ImagineClient;
+    several candidates, keep the most legible burn-in)
+  → save haiku.txt + report.md + image (when a still passes)
 
 Site posting / daily X / Notion / physical toaster: not in v1.
 """
@@ -39,6 +41,12 @@ if __name__ == "__main__" and (__package__ is None or __package__ == ""):
         sys.path.insert(0, str(_repo))
     __package__ = "scripts.haiku_toast"
 
+from .legibility import (
+    PickResult,
+    StillCandidate,
+    make_extract_fn,
+    pick_legible_still,
+)
 from .prompts import (
     FUTURE_STYLES_NOTE,
     IMAGINE_ASPECT_RATIO,
@@ -56,6 +64,11 @@ from .syllables import counts_label, haiku_counts, parse_haiku
 from .voice_modes import MODE_NAMES, ModePick, choose_mode
 from .weather import WeatherSeed, fetch_san_diego_weather, weekday_vibe
 from .writer import WriteResult, resolve_api_key, write_haiku
+from scripts.poem_visualizer.imagine_client import MAX_IMAGE_N
+
+# Morning default: a small gallery, not a single unlucky draw.
+DEFAULT_IMAGINE_N = 4
+MAX_IMAGINE_N = MAX_IMAGE_N
 
 
 @dataclass
@@ -82,6 +95,9 @@ class RunResult:
     style_seed: Optional[int] = None
     voice: Optional[ModePick] = None
     image_url: Optional[str] = None
+    imagine_n: int = 4
+    imagine_tried: int = 0
+    imagine_kept: Optional[int] = None
     notes: List[str] = field(default_factory=list)
     artifacts: Optional[RunArtifacts] = None
     write: Optional[WriteResult] = None
@@ -178,6 +194,17 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p.add_argument(
         "--haiku",
         help="Use this haiku (use \\n between lines) instead of calling the writer.",
+    )
+    p.add_argument(
+        "--imagine-n",
+        type=int,
+        default=DEFAULT_IMAGINE_N,
+        metavar="N",
+        help=(
+            "How many Imagine stills to request and score for the same "
+            f"prompt (default {DEFAULT_IMAGINE_N}, max {MAX_IMAGINE_N}). "
+            "Keeps the most legible burn-in; ships nothing if all fail."
+        ),
     )
     return p.parse_args(argv)
 
@@ -287,6 +314,8 @@ def render_report(result: RunResult) -> str:
         imagine_status = "ok"
     elif result.dry:
         imagine_status = "skipped (dry / no key)"
+    elif result.imagine_tried and not result.imagine_kept:
+        imagine_status = "failed (no legible burn-in)"
     else:
         imagine_status = "skipped / failed"
     lines += [
@@ -305,6 +334,26 @@ def render_report(result: RunResult) -> str:
     ]
     if result.image_url:
         lines.append(f"- Image URL: {result.image_url}")
+    if result.dry:
+        lines.append(
+            f"- Imagine candidates: {result.imagine_n} would be requested "
+            f"(`--imagine-n`; live runs score burn-in and keep one or fail)"
+        )
+    elif result.imagine_tried:
+        if result.imagine_kept:
+            lines.append(
+                f"- Imagine candidates: {result.imagine_tried} scored, "
+                f"kept #{result.imagine_kept} of {result.imagine_n} requested"
+            )
+        else:
+            lines.append(
+                f"- Imagine candidates: {result.imagine_tried} scored, "
+                f"none passed (requested {result.imagine_n}) — still not shipped"
+            )
+    else:
+        lines.append(
+            f"- Imagine candidates: {result.imagine_n} configured (`--imagine-n`)"
+        )
     if result.artifacts:
         art = result.artifacts
         lines += [
@@ -358,34 +407,99 @@ def save_artifacts(
     return artifacts
 
 
-def _maybe_imagine(imagine_prompt: str, dest: Path) -> tuple[Optional[str], Optional[Path], str]:
+def _maybe_imagine(
+    imagine_prompt: str,
+    dest: Path,
+    *,
+    haiku: str,
+    n: int = DEFAULT_IMAGINE_N,
+    extract_fn=None,
+) -> tuple[Optional[str], Optional[Path], str, PickResult]:
     """
     Optional Imagine path. Reuses scripts.poem_visualizer.imagine_client.
 
-    Returns (url, saved_path, note).
+    Requests up to ``n`` stills for the same prompt, scores burned text
+    against ``haiku``, and keeps one passer. If every candidate fails,
+    no official toast image is written.
+
+    Returns (url, saved_path, note, pick).
     """
     from scripts.poem_visualizer.imagine_client import ImagineClient
 
+    empty = PickResult(ok=False, tried=0, note="")
     client = ImagineClient.from_env()
     if client is None:
         return (
             None,
             None,
             "No XAI_API_KEY (or requests missing) — Imagine skipped; prompt saved.",
+            empty,
         )
 
-    img = client.generate_image(imagine_prompt, aspect_ratio=IMAGINE_ASPECT_RATIO)
-    if not (img.ok and img.url):
-        return None, None, f"Imagine failed: {img.error}"
+    img = client.collect_image_urls(
+        imagine_prompt, aspect_ratio=IMAGINE_ASPECT_RATIO, n=n
+    )
+    if not (img.ok and img.urls):
+        return None, None, f"Imagine failed: {img.error}", empty
 
-    err = _download_image(img.url, dest)
-    if err:
-        return img.url, None, f"Imagine ok, {err}"
-    return img.url, dest, "Imagine: ok"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    candidates: List[StillCandidate] = []
+    for i, url in enumerate(img.urls, start=1):
+        cand_path = dest.with_name(f"{dest.stem}_cand{i}{dest.suffix}")
+        err = _download_image(url, cand_path)
+        if err:
+            candidates.append(StillCandidate(index=i, url=url, path=None))
+        else:
+            candidates.append(StillCandidate(index=i, url=url, path=cand_path))
+
+    key = resolve_api_key()
+    picker = extract_fn or make_extract_fn(api_key=key)
+    pick = pick_legible_still(haiku, candidates, extract_fn=picker)
+
+    if pick.ok and pick.kept and pick.kept.candidate.path:
+        winner = pick.kept.candidate.path
+        dest.write_bytes(winner.read_bytes())
+        _cleanup_candidates(candidates, keep=dest)
+        return pick.kept.candidate.url, dest, pick.note, pick
+
+    # All failed (or winner had no local file): persist rejects, no official jpg.
+    _rename_rejects(candidates)
+    return None, None, pick.note, pick
+
+
+def _cleanup_candidates(candidates: List[StillCandidate], *, keep: Path) -> None:
+    keep_resolved = keep.resolve()
+    for cand in candidates:
+        if cand.path is None:
+            continue
+        try:
+            if cand.path.resolve() != keep_resolved:
+                cand.path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _rename_rejects(candidates: List[StillCandidate]) -> None:
+    for cand in candidates:
+        if cand.path is None or not cand.path.is_file():
+            continue
+        rejected = cand.path.with_name(
+            cand.path.name.replace("_cand", "_rejected_", 1)
+        )
+        # _toast_cand1.jpg → _toast_rejected_1.jpg
+        try:
+            cand.path.replace(rejected)
+        except OSError:
+            pass
 
 
 def run(argv: Optional[List[str]] = None) -> int:
     args = _parse_args(argv)
+    if args.imagine_n < 1 or args.imagine_n > MAX_IMAGINE_N:
+        raise SystemExit(
+            f"--imagine-n must be between 1 and {MAX_IMAGINE_N} "
+            f"(got {args.imagine_n})"
+        )
     repo_root = find_repo_root()
     out_dir = Path(args.out_dir) if args.out_dir else default_out_dir(repo_root)
     if not out_dir.is_absolute():
@@ -512,10 +626,11 @@ def run(argv: Optional[List[str]] = None) -> int:
         print(user_preview)
         print()
 
-    skip_imagine = dry or args.no_imagine
     image_url: Optional[str] = None
     image_path: Optional[Path] = None
     imagined = False
+    imagine_tried = 0
+    imagine_kept: Optional[int] = None
     stamp = san_diego_now().strftime("%Y%m%d-%H%M")
     pending_image = out_dir / f"{stamp}_toast.jpg"
 
@@ -523,15 +638,39 @@ def run(argv: Optional[List[str]] = None) -> int:
         notes.append("Imagine skipped (--no-imagine).")
         print("Imagine skipped (--no-imagine).\n")
     elif dry:
-        notes.append("Imagine skipped (dry / no key). Paste the prompt into Grok Imagine when ready.")
+        notes.append(
+            "Imagine skipped (dry / no key). Paste the prompt into Grok Imagine when ready. "
+            f"Live runs request {args.imagine_n} candidate(s) and keep the most legible burn-in."
+        )
         print("Imagine skipped (dry / no key). Prompt is saved.\n")
     else:
-        print(f"Summoning Grok Imagine ({IMAGINE_ASPECT_RATIO}) via poem_visualizer.ImagineClient…")
+        print(
+            f"Summoning Grok Imagine ({IMAGINE_ASPECT_RATIO}, n={args.imagine_n}) "
+            "via poem_visualizer.ImagineClient…"
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
-        image_url, image_path, note = _maybe_imagine(imagine_prompt, pending_image)
+        image_url, image_path, note, pick = _maybe_imagine(
+            imagine_prompt,
+            pending_image,
+            haiku=haiku,
+            n=args.imagine_n,
+        )
         notes.append(note)
-        imagined = image_url is not None
+        imagine_tried = pick.tried
+        imagine_kept = pick.kept_index
+        for row in pick.scores:
+            preview = (row.score.extracted or "").replace("\n", " / ")
+            if len(preview) > 80:
+                preview = preview[:79] + "…"
+            bit = f"#{row.candidate.index} {row.score.summary()} [{row.method}]"
+            if preview:
+                bit += f" — {preview}"
+            elif row.error:
+                bit += f" — {row.error}"
+            notes.append(f"Imagine candidate {bit}")
+        imagined = image_path is not None
         if image_path:
+            print(f"  {note}")
             print(f"  Image saved → {image_path}\n")
         else:
             print(f"  {note}\n")
@@ -550,6 +689,9 @@ def run(argv: Optional[List[str]] = None) -> int:
         style_seed=None if args.style else args.seed,
         voice=voice,
         image_url=image_url,
+        imagine_n=args.imagine_n,
+        imagine_tried=imagine_tried,
+        imagine_kept=imagine_kept,
         notes=notes,
         write=write,
     )
