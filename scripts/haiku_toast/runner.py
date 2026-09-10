@@ -13,8 +13,8 @@ Run from repo root:
     python -m scripts.haiku_toast.runner
 
 Flow:
-  San Diego date + thin weather seed
-  → voice mode (weather map, or --mode)
+  San Diego date + morning hourly Open-Meteo
+  → Ann weather drawer (or --mode)
   → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
   → optional Grok Imagine stills (reuses poem_visualizer.ImagineClient;
@@ -61,6 +61,12 @@ from .style_catalog import (
     fill_imagine_prompt,
 )
 from .syllables import counts_label, haiku_counts, parse_haiku
+from .drawers import (
+    DRAWERS,
+    load_last_drawer,
+    save_last_drawer,
+    yesterday_note,
+)
 from .voice_modes import MODE_NAMES, ModePick, choose_mode
 from .weather import WeatherSeed, fetch_san_diego_weather, weekday_vibe
 from .writer import WriteResult, resolve_api_key, write_haiku
@@ -136,8 +142,9 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="python -m scripts.haiku_toast",
         description=(
-            "Daily Haiku Toast: San Diego date + weather seed → "
-            "short three-line haiku → Imagine still from the local catalog."
+            "Daily Haiku Toast: San Diego date + morning hourly weather "
+            "drawer → short three-line haiku → Imagine still from the "
+            "local catalog."
         ),
     )
     p.add_argument(
@@ -152,7 +159,7 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         "--seed",
         type=int,
         help=(
-            "RNG seed for random style pick and weather-mode ties "
+            "RNG seed for random style pick and drawer-tell pick "
             "(ignored for a pick that has an explicit --style / --mode)."
         ),
     )
@@ -162,8 +169,7 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         help=(
             "Force a voice mode ("
             + ", ".join(MODE_NAMES)
-            + "). Default: map the weather seed, with a low-weight "
-            "tender / picnic_wink alternate."
+            + "). Default: Ann's weather → drawer tree (first match wins)."
         ),
     )
     p.add_argument(
@@ -260,22 +266,26 @@ def render_report(result: RunResult) -> str:
         mode_display = voice.mode.display_name
         mode_heat = voice.mode.heat
         mode_reason = voice.reason
+        drawer_name = voice.drawer_display or voice.drawer or "n/a"
+        tell = voice.tell or "n/a"
         if voice.selection == "cli":
             mode_pick_line = f"`--mode {mode_name}`"
-        elif voice.selection == "random":
-            mode_pick_line = "random among all five modes (weather unavailable)"
+        elif voice.selection == "fallback":
+            mode_pick_line = "CLEAR MILD fallback (weather unavailable)"
         else:
-            mode_pick_line = "weather map (Imagine style is separate)"
+            mode_pick_line = "weather drawer (Imagine style is separate)"
     else:
         mode_name = "unknown"
         mode_display = "unknown"
         mode_heat = "?"
         mode_reason = "mode was not chosen this run"
         mode_pick_line = "n/a"
+        drawer_name = "n/a"
+        tell = "n/a"
     lines = [
         f"# Daily Haiku Toast — {result.date_line}",
         "",
-        f"_San Diego · {result.weekday} · style `{style_name}` · mode `{mode_name}`_",
+        f"_San Diego · {result.weekday} · style `{style_name}` · mode `{mode_name}` · drawer `{drawer_name}`_",
         "",
         "## Style",
         "",
@@ -288,16 +298,23 @@ def render_report(result: RunResult) -> str:
         f"- **Selection:** {mode_pick_line}",
         f"- **Reason:** {mode_reason}",
         "",
+        "## Weather drawer",
+        "",
+        f"- **Drawer:** {drawer_name}",
+        f"- **Reason:** {mode_reason}",
+        f"- **Tell:** {tell}",
+        "",
         "## Haiku",
         "",
         result.haiku or "_(no haiku this run)_",
         "",
-        "## Date & weather seed",
+        "## Date & weather",
         "",
         f"- **Date:** {result.date_line} (`{SAN_DIEGO_TZ}`)",
         f"- **Weekday vibe:** {weekday_vibe(result.weekday)}",
-        f"- **Weather:** {weather.seed_line()}",
-        f"- **Source:** {weather.source} ({weather.source_url}) — high/low °F + one condition word. Not a weather product.",
+        f"- **Hourly:** {weather.hourly_report_line()}",
+        f"- **Daily:** {weather.daily_context_line()}",
+        f"- **Source:** {weather.source} ({weather.source_url}) — hourly at pull hour + daily sunrise. Not a weather product.",
         "",
         "## Syllables (optional heuristic)",
         "",
@@ -528,20 +545,28 @@ def run(argv: Optional[List[str]] = None) -> int:
         weather = WeatherSeed(ok=False, error="--no-weather")
         print("Weather fetch skipped (--no-weather).")
     else:
-        print("Fetching thin San Diego seed from Open-Meteo…")
-        weather = fetch_san_diego_weather()
+        print("Fetching San Diego morning hourly from Open-Meteo…")
+        weather = fetch_san_diego_weather(when=when)
         print(f"  {weather.seed_line()}")
 
+    today = when.date().isoformat()
+    y_drawer, y_tell = yesterday_note(load_last_drawer(out_dir), today)
     try:
         voice = choose_mode(
             weather,
             name=args.mode,
             hour=when.hour,
             seed=None if args.mode else args.seed,
+            yesterday_drawer=y_drawer,
+            yesterday_tell=y_tell,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+    drawer_label = voice.drawer_display or voice.drawer or "n/a"
+    print(f"  Drawer: {drawer_label}")
     print(f"  Mode: {voice.mode.name}  ({voice.reason})")
+    if voice.tell:
+        print(f"  Tell: {voice.tell}")
     print()
 
     key = resolve_api_key()
@@ -577,6 +602,17 @@ def run(argv: Optional[List[str]] = None) -> int:
             mode_name=voice.mode.name,
             mode_heat=voice.mode.heat,
             mode_hint=voice.mode.hint,
+            drawer_name=voice.drawer_display or voice.drawer or "",
+            drawer_reason=voice.reason,
+            chosen_tell=voice.tell or "",
+            avoids=", ".join(voice.avoids),
+            yesterday_tell=voice.yesterday_tell or "",
+            drawer_changed=bool(
+                voice.yesterday_drawer
+                and voice.drawer
+                and voice.yesterday_drawer != voice.drawer
+            ),
+            drawer_spec=DRAWERS.get(voice.drawer or ""),
             api_key=key,
         )
         if not write.ok:
@@ -614,6 +650,16 @@ def run(argv: Optional[List[str]] = None) -> int:
             mode_name=voice.mode.name,
             mode_heat=voice.mode.heat,
             mode_hint=voice.mode.hint,
+            drawer_name=voice.drawer_display or voice.drawer or "",
+            drawer_reason=voice.reason,
+            chosen_tell=voice.tell or "",
+            avoids=", ".join(voice.avoids),
+            yesterday_tell=voice.yesterday_tell or "",
+            drawer_changed=bool(
+                voice.yesterday_drawer
+                and voice.drawer
+                and voice.yesterday_drawer != voice.drawer
+            ),
         )
         notes.append("Writer system brief + user seed saved in this report's notes.")
         print("─" * 56)
@@ -702,13 +748,20 @@ def run(argv: Optional[List[str]] = None) -> int:
     artifacts = save_artifacts(
         result, out_dir=out_dir, stamp=stamp, image_path=image_path
     )
+    if voice.drawer and voice.tell:
+        save_last_drawer(
+            out_dir, date=today, drawer=voice.drawer, tell=voice.tell
+        )
 
     print("─" * 56)
     print(f"Haiku  → {artifacts.haiku_path}")
     print(f"Report → {artifacts.report_path}")
     if artifacts.image_path:
         print(f"Image  → {artifacts.image_path}")
-    print(f"Style `{style.name}` · mode `{voice.mode.name}`.")
+    print(
+        f"Style `{style.name}` · mode `{voice.mode.name}` · "
+        f"drawer `{drawer_label}`."
+    )
     print("─" * 56)
     return 0
 
