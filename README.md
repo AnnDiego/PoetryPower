@@ -17,11 +17,11 @@ Run from the repo root (with venv activated):
 python -m scripts.poem_visualizer.visualizer
 
 ### haiku_toast
-Daily Haiku Toast. San Diego date + a thin weather seed → one short three-line haiku in Ann’s locked Poetess voice → Grok Imagine still of toast with the haiku burned into the crust. Prefer a nice morning scrap over a counted 5-7-5. Heat ceiling 0–2.
+Daily Haiku Toast. San Diego date + morning hourly Open-Meteo → Ann’s weather drawer → one short three-line haiku in Ann’s locked Poetess voice → Grok Imagine still of toast with the haiku burned into the crust. Prefer a nice morning scrap over a counted 5-7-5. Heat ceiling 0–2; weather drawers stay 0–1 and never raise chili from temperature.
 
-Each run picks one **voice mode** from the weather seed (or `--mode`) and one **Imagine style** from a small catalog local to this package (not the `styles/` visualizer catalog). Style roulette and voice mode are separate. Default style is random among enabled; pass `--seed` to reproduce random picks, or `--style` / `--mode` to force one.
+Each run picks one **weather drawer** (or `--mode`) and one **Imagine style** from a small catalog local to this package (not the `styles/` visualizer catalog). Style roulette and voice mode are separate. Default style is random among enabled; pass `--seed` to reproduce random picks, or `--style` / `--mode` to force one.
 
-Locked voice seed: `scripts/haiku_toast/VOICE_SEED.md` (loaded as the writer system brief). Modes: `verdant`, `starlit_dawn`, `tender`, `picnic_wink`, `soft_weather_soul`.
+Locked voice seed: `scripts/haiku_toast/VOICE_SEED.md` (loaded as the writer system brief). Drawer modes: `verdant`, `soft_weather_soul`, `hybrid_burnoff`, `sun_ode`, `clear_mild`, `starlit_dawn`, `rain`. `--mode` also still accepts `tender` and `picnic_wink`.
 
 Enabled now:
 - `buttered` — rustic wooden board, melting butter on the toast (board default evolution). Keeper: `scripts/haiku_toast/examples/buttered.jpg`
@@ -39,8 +39,8 @@ python -m scripts.haiku_toast --mode verdant
 
 - No `XAI_API_KEY`: prompt-only (writer seed + chosen style template, keeper sample haiku).
 - With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`. Live Imagine requests **4** stills for the same prompt (`--imagine-n`, max 10), reads the burned letters (xAI vision; optional local `tesseract` if vision cannot run), and keeps the one that best matches the haiku. If every candidate fails the check, the report says so and no `*_toast.jpg` is shipped.
-- Weather: Open-Meteo (https://open-meteo.com/) high/low °F + one condition word for downtown San Diego. Not a weather product.
-- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when a still passes). The report records Imagine style, voice mode, how many candidates were scored, and which was kept (or that all failed). Generated images are gitignored.
+- Weather: Open-Meteo (https://open-meteo.com/) **hourly at pull hour** + daily sunrise for coastal San Diego (`weather_code`, cloud, visibility, humidity, temperature, precipitation, `is_day`). Ann’s drawer tree maps sky + moisture + light — not the daily high. Chili is never raised by temperature. The toast report names the drawer, reason, and tell.
+- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when a still passes). The report records Imagine style, voice mode, weather drawer, how many candidates were scored, and which was kept (or that all failed). Generated images and `toasts/.last_drawer.json` (yesterday’s drawer/tell) are gitignored.
 - Site posting, daily auto-X, Notion, and a physical toaster are follow-ups — not in this runner.
 
 Imagine templates (replace `{HAIKU}` only) live in `scripts/haiku_toast/style_catalog.py`. Both enabled templates require exactly three lines and letters that follow the crumb as Maillard browning, not printed ink.
