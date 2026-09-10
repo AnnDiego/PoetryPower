@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import requests
@@ -41,6 +41,8 @@ except ImportError:  # pragma: no cover - optional until pip install
 DEFAULT_BASE_URL = "https://api.x.ai/v1"
 DEFAULT_IMAGE_MODEL = "grok-imagine-image-quality"
 DEFAULT_VIDEO_MODEL = "grok-imagine-video"
+# Official Imagine image-generation docs: n is 1–10 on /v1/images/generations.
+MAX_IMAGE_N = 10
 
 # Avoid re-scanning the filesystem on every from_env() call in one process
 _DOTENV_LOADED = False
@@ -85,6 +87,7 @@ class ImagineResult:
 
     ok: bool
     url: Optional[str] = None
+    urls: List[str] = field(default_factory=list)
     error: Optional[str] = None
     raw: Optional[Dict[str, Any]] = None
 
@@ -153,8 +156,13 @@ class ImagineClient:
     ) -> ImagineResult:
         """
         Text-to-image via /v1/images/generations.
-        Returns the first image URL when available.
+
+        One HTTP request. When the API honors ``n`` > 1, ``urls`` holds every
+        returned still and ``url`` is the first (backward compatible).
+        Call :meth:`collect_image_urls` if you also want sequential backfill
+        when a batch returns fewer URLs than requested.
         """
+        n = _clamp_image_n(n)
         payload: Dict[str, Any] = {
             "model": self.image_model,
             "prompt": prompt,
@@ -182,14 +190,77 @@ class ImagineClient:
             )
 
         data = _try_json(resp) or {}
-        url = _extract_image_url(data)
-        if not url:
+        urls = _extract_image_urls(data)
+        if not urls:
             return ImagineResult(
                 ok=False,
                 error="Image API returned no URL (unexpected response shape).",
                 raw=data,
             )
-        return ImagineResult(ok=True, url=url, raw=data)
+        return ImagineResult(ok=True, url=urls[0], urls=urls, raw=data)
+
+    def collect_image_urls(
+        self,
+        prompt: str,
+        *,
+        aspect_ratio: str = "9:16",
+        n: int = 1,
+    ) -> ImagineResult:
+        """
+        Gather up to ``n`` still URLs for the same prompt + aspect ratio.
+
+        Official Imagine docs (``/v1/images/generations``) accept ``n`` 1–10
+        and return one entry per image in ``data[]``. This helper:
+
+        1. Issues one batch request with that ``n``.
+        2. If the batch fails or returns fewer URLs than asked (some
+           deployments ignore ``n`` and emit a single still), fills the
+           remainder with sequential ``n=1`` calls.
+
+        ``url`` is the first collected still; ``urls`` is the full list.
+        ``error`` may still be set when ok=True if a later fill failed
+        after at least one URL was collected.
+        """
+        n = _clamp_image_n(n)
+        urls: List[str] = []
+        errors: List[str] = []
+        raw: Optional[Dict[str, Any]] = None
+
+        batch = self.generate_image(prompt, aspect_ratio=aspect_ratio, n=n)
+        raw = batch.raw
+        if batch.ok:
+            urls = _unique_urls(batch.urls or ([batch.url] if batch.url else []))
+        elif batch.error:
+            errors.append(batch.error)
+
+        # Remaining slots after the batch (or a full sequential pass if
+        # a multi-image batch produced nothing). A failed n=1 request is
+        # not retried here — same as generate_image.
+        remaining = n - len(urls)
+        if remaining > 0 and n == 1 and not batch.ok:
+            remaining = 0
+        for _ in range(remaining):
+            extra = self.generate_image(prompt, aspect_ratio=aspect_ratio, n=1)
+            if raw is None:
+                raw = extra.raw
+            if extra.ok:
+                for u in extra.urls or ([extra.url] if extra.url else []):
+                    if u and u not in urls:
+                        urls.append(u)
+                        if len(urls) >= n:
+                            break
+            elif extra.error:
+                errors.append(extra.error)
+                # Keep going — one failed single should not drop later draws.
+
+        err = "; ".join(e for e in errors if e) or None
+        if urls:
+            return ImagineResult(ok=True, url=urls[0], urls=urls[:n], error=err, raw=raw)
+        return ImagineResult(
+            ok=False,
+            error=err or "Image API returned no URL.",
+            raw=raw,
+        )
 
     # ------------------------------------------------------------------
     # Video (async start + poll)
@@ -307,19 +378,56 @@ def _safe_body(resp: Any, limit: int = 400) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def _extract_image_url(data: Dict[str, Any]) -> Optional[str]:
+def _clamp_image_n(n: int) -> int:
+    try:
+        value = int(n)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, min(value, MAX_IMAGE_N))
+
+
+def _unique_urls(urls: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for url in urls:
+        if not isinstance(url, str):
+            continue
+        cleaned = url.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            out.append(cleaned)
+    return out
+
+
+def _extract_image_urls(data: Dict[str, Any]) -> List[str]:
     """
-    Handle common response shapes:
-      { "data": [ { "url": "..." } ] }   # OpenAI-compatible
+    Collect every image URL from common response shapes:
+
+      { "data": [ { "url": "..." }, { "url": "..." } ] }   # OpenAI / xAI
       { "url": "..." }
+      { "images": [ { "url": "..." } ] }                  # occasional alias
+
+    Official Imagine docs return one ``data[]`` entry per requested ``n``.
     """
-    if isinstance(data.get("url"), str):
-        return data["url"]
+    found: List[str] = []
     items = data.get("data")
-    if isinstance(items, list) and items:
-        first = items[0]
-        if isinstance(first, dict):
-            if isinstance(first.get("url"), str):
-                return first["url"]
-            # some SDKs nest under b64 / revised_prompt only — ignore
-    return None
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and isinstance(item.get("url"), str):
+                found.append(item["url"])
+    if not found and isinstance(data.get("url"), str):
+        found.append(data["url"])
+    images = data.get("images")
+    if not found and isinstance(images, list):
+        for item in images:
+            if isinstance(item, str):
+                found.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("url"), str):
+                found.append(item["url"])
+    return _unique_urls(found)
+
+
+def _extract_image_url(data: Dict[str, Any]) -> Optional[str]:
+    """First URL only — kept for callers that still expect a single still."""
+    urls = _extract_image_urls(data)
+    return urls[0] if urls else None

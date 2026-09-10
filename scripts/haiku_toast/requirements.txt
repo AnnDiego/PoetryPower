@@ -1,5 +1,7 @@
 # Daily Haiku Toast — same runtime family as poem_visualizer
 # (Imagine client + .env loading + Open-Meteo + chat/completions).
+# Burn-in check uses xAI vision through requests (no extra OCR package).
+# Optional: a tesseract binary on PATH is used only if vision cannot run.
 #
 # From repo root:
 #   pip install -r scripts/haiku_toast/requirements.txt
