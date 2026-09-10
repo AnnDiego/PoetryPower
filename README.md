@@ -38,9 +38,9 @@ python -m scripts.haiku_toast --seed 17
 python -m scripts.haiku_toast --mode verdant
 
 - No `XAI_API_KEY`: prompt-only (writer seed + chosen style template, keeper sample haiku).
-- With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`.
+- With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`. Live Imagine requests **4** stills for the same prompt (`--imagine-n`, max 10), reads the burned letters (xAI vision; optional local `tesseract` if vision cannot run), and keeps the one that best matches the haiku. If every candidate fails the check, the report says so and no `*_toast.jpg` is shipped.
 - Weather: Open-Meteo (https://open-meteo.com/) high/low °F + one condition word for downtown San Diego. Not a weather product.
-- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when Imagine succeeds). The report records Imagine style, voice mode, and the weather→mode reason. Generated images are gitignored.
+- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when a still passes). The report records Imagine style, voice mode, how many candidates were scored, and which was kept (or that all failed). Generated images are gitignored.
 - Site posting, daily auto-X, Notion, and a physical toaster are follow-ups — not in this runner.
 
 Imagine templates (replace `{HAIKU}` only) live in `scripts/haiku_toast/style_catalog.py`. Both enabled templates require exactly three lines and letters that follow the crumb as Maillard browning, not printed ink.
