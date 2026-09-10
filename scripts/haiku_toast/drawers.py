@@ -89,6 +89,33 @@ SOFT_NATURE_BODY = frozenset(
 )
 _SOFT_NATURE_CANON = {"toe": "toes", "tendril": "tendrils"}
 
+# Too common to treat as a "signature noun" across mornings.
+_GENERIC_SIGNATURE = frozenset(
+    {
+        "sun",
+        "day",
+        "dawn",
+        "morning",
+        "light",
+        "sky",
+        "first",
+        "finds",
+        "still",
+        "heat",
+        "gold",
+        "gray",
+        "grey",
+        "will",
+        "that",
+        "this",
+        "through",
+        "promise",
+        "considering",
+        "breaking",
+        "clothes",
+    }
+)
+
 # Drawers that may stay nature-forward. Still no earth-body pile-on.
 NATURE_ONLY_DRAWERS = frozenset(
     {
@@ -465,7 +492,12 @@ def recent_signature_nouns(recent: Sequence[LastDrawer]) -> List[str]:
     tag_names = set(MOTIF_TAG_WORDS)
     for mem in recent:
         for word in (*tell_tokens(mem.tell), *mem.key_words):
-            if word in seen or word in tag_names or word in _STOP:
+            if (
+                word in seen
+                or word in tag_names
+                or word in _STOP
+                or word in _GENERIC_SIGNATURE
+            ):
                 continue
             seen.add(word)
             out.append(word)
@@ -762,7 +794,8 @@ def choose_tell_filtered(
     if changed:
         filtered = [t for t in tells if t != yesterday_tell]
         if filtered:
-            skipped.append(yesterday_tell)
+            if yesterday_tell in tells:
+                skipped.append(yesterday_tell)
             tells = filtered
     if recent:
         kept = [t for t in tells if not tell_collides_with_recent(t, recent)]
@@ -863,15 +896,16 @@ def motif_tags_for_text(text: str) -> Tuple[str, ...]:
 
 
 def extract_key_words(tell: str, haiku: str = "") -> Tuple[str, ...]:
-    """Signature nouns: drawer-tell lexicon + soft-nature hits."""
+    """Signature nouns: distinctive tell tokens + soft-nature hits."""
     allowed = all_tell_words()
     out: List[str] = []
     seen = set()
     for word in (*tell_tokens(tell), *tell_tokens(haiku), *soft_nature_hits(haiku)):
-        if word in seen or word not in allowed:
+        if word in seen or word in _GENERIC_SIGNATURE:
             continue
-        seen.add(word)
-        out.append(word)
+        if word in SOFT_NATURE_BODY or word in allowed:
+            seen.add(word)
+            out.append(word)
     return tuple(out)
 
 
@@ -883,15 +917,19 @@ def tell_collides_with_recent(
     if not recent:
         return False
     tell_l = tell.lower()
-    tokens = set(tell_tokens(tell))
+    tokens = {w for w in tell_tokens(tell) if w not in _GENERIC_SIGNATURE}
     tell_soft = set(soft_nature_hits(tell))
     recent_tokens: set = set()
     recent_soft = False
     for mem in recent:
         if mem.tell and mem.tell.lower() == tell_l:
             return True
-        recent_tokens.update(tell_tokens(mem.tell))
-        recent_tokens.update(mem.key_words)
+        recent_tokens.update(
+            w for w in tell_tokens(mem.tell) if w not in _GENERIC_SIGNATURE
+        )
+        recent_tokens.update(
+            w for w in mem.key_words if w not in _GENERIC_SIGNATURE
+        )
         if SAMEY_MOTIFS & set(mem.motifs) or soft_nature_hits(mem.tell):
             recent_soft = True
         if set(mem.key_words) & SOFT_NATURE_BODY:
