@@ -2,23 +2,24 @@
 Voice modes for Morning Haiku Toast.
 
 Separate from Imagine style roulette (buttered / toaster_popup).
-Maps the thin Open-Meteo seed onto one of five locked modes.
+Maps Ann's weather → drawer tree onto a locked mode + heat 0–1.
 """
 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Optional, Sequence
 
+from .drawers import (
+    DRAWERS,
+    MODE_DRAWER,
+    DrawerDecision,
+    attach_tell,
+    choose_tell,
+    select_drawer,
+)
 from .weather import WeatherSeed
-
-# Cool San Diego morning: low at or under this prefers starlit_dawn early.
-COOL_LOW_MAX_F = 60
-# Chance, after the weather primary, to slip in tender or picnic_wink
-# so love/breakfast days still happen.
-ALTERNATE_P = 0.18
-EARLY_HOUR = 8
 
 
 @dataclass(frozen=True)
@@ -29,23 +30,54 @@ class VoiceMode:
     hint: str
 
 
+# Weather drawers stay heat 0–1. tender / picnic_wink remain for --mode.
 MODES: Sequence[VoiceMode] = (
     VoiceMode(
         name="verdant",
-        display_name="Verdant",
+        display_name="Verdant gloom",
         heat="0–1",
-        hint="Mist, May gray / June gloom, peat, clover, sun creeping toes → heart",
+        hint=DRAWERS["FOG"].hint,
+    ),
+    VoiceMode(
+        name="soft_weather_soul",
+        display_name="Soft weather-soul",
+        heat="0–1",
+        hint=DRAWERS["OVERCAST"].hint,
+    ),
+    VoiceMode(
+        name="hybrid_burnoff",
+        display_name="Hybrid burnoff",
+        heat="0–1",
+        hint=DRAWERS["HYBRID_BURNOFF"].hint,
+    ),
+    VoiceMode(
+        name="sun_ode",
+        display_name="Sun-ode",
+        heat="0–1",
+        hint=DRAWERS["CLEAR_HOT"].hint,
+    ),
+    VoiceMode(
+        name="clear_mild",
+        display_name="Clear mild",
+        heat="0–1",
+        hint=DRAWERS["CLEAR_MILD"].hint,
     ),
     VoiceMode(
         name="starlit_dawn",
         display_name="Starlit dawn",
         heat="0–1",
-        hint="Moon surrendering to sun; Venus still up; wet grass; last stars",
+        hint=DRAWERS["STARLIT_DAWN"].hint,
+    ),
+    VoiceMode(
+        name="rain",
+        display_name="Rain's promise",
+        heat="0–1",
+        hint=DRAWERS["RAIN"].hint,
     ),
     VoiceMode(
         name="tender",
         display_name="Tender",
-        heat="1",
+        heat="0–1",
         hint="Face on the next pillow, hands that stay, a small vow",
     ),
     VoiceMode(
@@ -54,38 +86,40 @@ MODES: Sequence[VoiceMode] = (
         heat="0–1",
         hint="Brie, coffee, checkered cloth — one concrete pleasure, optional wink",
     ),
-    VoiceMode(
-        name="soft_weather_soul",
-        display_name="Soft weather soul",
-        heat="0–1",
-        hint="Rain’s promise, wind chimes, “I’ll bring you rain,” green enduring",
-    ),
 )
 
 MODE_NAMES = [m.name for m in MODES]
 _BY_NAME: Dict[str, VoiceMode] = {m.name: m for m in MODES}
-ALTERNATES = ("tender", "picnic_wink")
-
-_GRAY_MIST = (
-    "fog",
-    "mist",
-    "overcast",
-    "cloud",
-    "gray",
-    "drizzle",
-    "rime",
-)
-_RAIN = ("rain", "shower", "thunder", "snow")
-_CLEAR = ("clear", "sunny", "fair")
-_WINDY = ("wind",)
+_ALIASES = {
+    "fog": "verdant",
+    "marine_layer": "verdant",
+    "verdant_gloom": "verdant",
+    "overcast": "soft_weather_soul",
+    "gloom": "soft_weather_soul",
+    "clear_hot": "sun_ode",
+    "sunode": "sun_ode",
+    "rains_promise": "rain",
+    "rain_promise": "rain",
+    "hybrid": "hybrid_burnoff",
+    "burnoff": "hybrid_burnoff",
+    "starlit": "starlit_dawn",
+    "mild": "clear_mild",
+}
 
 
 @dataclass
 class ModePick:
     mode: VoiceMode
     reason: str
-    selection: str  # cli | weather | random
+    selection: str  # cli | weather | fallback
     seed: Optional[int] = None
+    drawer: Optional[str] = None
+    drawer_display: Optional[str] = None
+    tell: Optional[str] = None
+    avoids: Sequence[str] = field(default_factory=tuple)
+    yesterday_tell: Optional[str] = None
+    yesterday_drawer: Optional[str] = None
+    decision: Optional[DrawerDecision] = None
 
 
 def _normalize(name: str) -> str:
@@ -94,6 +128,7 @@ def _normalize(name: str) -> str:
 
 def get_mode(name: str) -> Optional[VoiceMode]:
     key = _normalize(name)
+    key = _ALIASES.get(key, key)
     if key in _BY_NAME:
         return _BY_NAME[key]
     for mode in MODES:
@@ -102,122 +137,61 @@ def get_mode(name: str) -> Optional[VoiceMode]:
     return None
 
 
-def _condition_blob(weather: WeatherSeed) -> str:
-    return (weather.condition or "unknown").strip().lower().replace("_", "-")
+def mode_for_drawer(drawer_name: str) -> VoiceMode:
+    spec = DRAWERS[drawer_name]
+    return _BY_NAME[spec.mode_name]
 
 
-def primary_pool(
-    weather: WeatherSeed,
+def _pick_from_decision(
+    decision: DrawerDecision,
     *,
-    hour: Optional[int] = None,
-) -> Tuple[List[str], Dict[str, float], str]:
-    """
-    Return (names, weights, reason) for the weather-primary pool.
-
-    Weights are used when a pool has a preferred member (cool-clear early
-    hours weight starlit_dawn). Equal weights otherwise.
-    """
-    if not weather.ok:
-        names = list(MODE_NAMES)
-        weights = {n: 1.0 for n in names}
-        return names, weights, "weather unavailable — random among all five modes"
-
-    cond = _condition_blob(weather)
-    low = weather.low_f
-    high = weather.high_f
-
-    if any(token in cond for token in _RAIN):
-        names = ["soft_weather_soul"]
-        return names, {n: 1.0 for n in names}, f"{cond} → soft_weather_soul"
-
-    if any(token in cond for token in _GRAY_MIST):
-        names = ["verdant", "soft_weather_soul"]
-        return (
-            names,
-            {n: 1.0 for n in names},
-            f"{cond} → verdant or soft_weather_soul",
-        )
-
-    if any(token in cond for token in _CLEAR):
-        cool = low is not None and low <= COOL_LOW_MAX_F
-        warm = low is not None and high is not None and low > COOL_LOW_MAX_F
-        if cool:
-            early = hour is not None and hour < EARLY_HOUR
-            if early:
-                names = ["starlit_dawn", "verdant"]
-                weights = {"starlit_dawn": 0.7, "verdant": 0.3}
-                reason = (
-                    f"{cond}, cool morning (low {low}°F), hour {hour} "
-                    f"< {EARLY_HOUR} — starlit_dawn weighted, else verdant"
-                )
-            else:
-                names = ["verdant", "starlit_dawn"]
-                weights = {"verdant": 0.7, "starlit_dawn": 0.3}
-                hour_bit = f"hour {hour}" if hour is not None else "hour unknown"
-                reason = (
-                    f"{cond}, cool morning (low {low}°F), {hour_bit} — "
-                    "verdant preferred, starlit_dawn still possible"
-                )
-            return names, weights, reason
-        if warm:
-            names = ["verdant", "picnic_wink"]
-            return (
-                names,
-                {n: 1.0 for n in names},
-                f"{cond}, warm (low {low}°F / high {high}°F) → verdant or picnic_wink",
-            )
-        names = ["verdant", "starlit_dawn"]
-        return names, {n: 1.0 for n in names}, f"{cond} → verdant or starlit_dawn"
-
-    if any(token in cond for token in _WINDY):
-        names = ["soft_weather_soul", "verdant"]
-        return (
-            names,
-            {n: 1.0 for n in names},
-            f"{cond} → soft_weather_soul or verdant",
-        )
-
-    names = list(MODE_NAMES)
-    return (
-        names,
-        {n: 1.0 for n in names},
-        f"{cond} unmatched — random among all five modes",
+    selection: str,
+    seed: Optional[int],
+    yesterday_drawer: Optional[str],
+    yesterday_tell: Optional[str],
+    rng: random.Random,
+) -> ModePick:
+    attach_tell(
+        decision,
+        yesterday_drawer=yesterday_drawer,
+        yesterday_tell=yesterday_tell,
+        rng=rng,
     )
-
-
-def _weighted_pick(weights: Dict[str, float], rng: random.Random) -> str:
-    names = list(weights)
-    vals = [weights[n] for n in names]
-    return rng.choices(names, weights=vals, k=1)[0]
+    mode = _BY_NAME[decision.spec.mode_name]
+    # Drawer heat is always 0–1; never lift from temperature_2m.
+    return ModePick(
+        mode=mode,
+        reason=decision.reason,
+        selection=selection,
+        seed=seed,
+        drawer=decision.name,
+        drawer_display=decision.display_name,
+        tell=decision.tell,
+        avoids=decision.spec.avoids,
+        yesterday_tell=yesterday_tell,
+        yesterday_drawer=yesterday_drawer,
+        decision=decision,
+    )
 
 
 def choose_mode(
     weather: WeatherSeed,
     *,
     name: Optional[str] = None,
-    hour: Optional[int] = None,
+    hour: Optional[int] = None,  # kept for call-site compatibility; unused
     seed: Optional[int] = None,
     rng: Optional[random.Random] = None,
-    allow_alternate: bool = True,
+    allow_alternate: bool = True,  # unused; tree is one drawer, no alternate
+    yesterday_drawer: Optional[str] = None,
+    yesterday_tell: Optional[str] = None,
 ) -> ModePick:
     """
     Pick a voice mode.
 
-    --mode name  → that mode
-    otherwise    → weather map, then a low-weight tender/picnic_wink alternate
+    --mode name  → that mode (tells from its drawer if it has one)
+    otherwise    → Ann's weather drawer tree (first match wins)
     """
-    if name:
-        found = get_mode(name)
-        if found is None:
-            known = ", ".join(MODE_NAMES)
-            raise ValueError(f"Unknown voice mode {name!r}. Known: {known}")
-        return ModePick(
-            mode=found,
-            reason=f"`--mode {found.name}`",
-            selection="cli",
-            seed=None,
-        )
-
+    del hour, allow_alternate  # weather tree replaced the old pool / alternate
     if rng is not None:
         chooser = rng
     elif seed is not None:
@@ -225,15 +199,55 @@ def choose_mode(
     else:
         chooser = random.Random()
 
-    names, weights, reason = primary_pool(weather, hour=hour)
-    picked = _weighted_pick(weights, chooser)
-    selection = "random" if not weather.ok else "weather"
+    if name:
+        found = get_mode(name)
+        if found is None:
+            known = ", ".join(MODE_NAMES)
+            raise ValueError(f"Unknown voice mode {name!r}. Known: {known}")
+        drawer_name = MODE_DRAWER.get(found.name)
+        tell = None
+        avoids: Sequence[str] = ()
+        drawer_display = None
+        if drawer_name:
+            spec = DRAWERS[drawer_name]
+            tell = choose_tell(
+                spec,
+                yesterday_drawer=yesterday_drawer,
+                yesterday_tell=yesterday_tell,
+                rng=chooser,
+            )
+            avoids = spec.avoids
+            drawer_display = spec.display_name
+        return ModePick(
+            mode=found,
+            reason=f"`--mode {found.name}`",
+            selection="cli",
+            seed=None,
+            drawer=drawer_name,
+            drawer_display=drawer_display,
+            tell=tell,
+            avoids=avoids,
+            yesterday_tell=yesterday_tell,
+            yesterday_drawer=yesterday_drawer,
+        )
 
-    if allow_alternate and chooser.random() < ALTERNATE_P:
-        alt = chooser.choice(list(ALTERNATES))
-        if alt != picked:
-            reason = f"{reason}; low-weight love/breakfast alternate → {alt}"
-            picked = alt
+    if not weather.ok:
+        decision = select_drawer(weather)
+        return _pick_from_decision(
+            decision,
+            selection="fallback",
+            seed=seed,
+            yesterday_drawer=yesterday_drawer,
+            yesterday_tell=yesterday_tell,
+            rng=chooser,
+        )
 
-    mode = _BY_NAME[picked]
-    return ModePick(mode=mode, reason=reason, selection=selection, seed=seed)
+    decision = select_drawer(weather)
+    return _pick_from_decision(
+        decision,
+        selection="weather",
+        seed=seed,
+        yesterday_drawer=yesterday_drawer,
+        yesterday_tell=yesterday_tell,
+        rng=chooser,
+    )

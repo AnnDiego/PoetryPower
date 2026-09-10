@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from .drawers import DrawerSpec, drawer_voice_problems
 from .prompts import VOICE_BRIEF, writer_user_prompt
 from .syllables import haiku_counts, parse_haiku
 
@@ -95,6 +96,37 @@ def _chat_complete(
     return content
 
 
+def _user_seed(
+    *,
+    date_line: str,
+    weekday_vibe: str,
+    weather_seed: str,
+    mode_name: str,
+    mode_heat: str,
+    mode_hint: str,
+    drawer_name: str,
+    drawer_reason: str,
+    chosen_tell: str,
+    avoids: str,
+    yesterday_tell: str,
+    drawer_changed: bool,
+) -> str:
+    return writer_user_prompt(
+        date_line=date_line,
+        weekday_vibe=weekday_vibe,
+        weather_seed=weather_seed,
+        mode_name=mode_name,
+        mode_heat=mode_heat,
+        mode_hint=mode_hint,
+        drawer_name=drawer_name,
+        drawer_reason=drawer_reason,
+        chosen_tell=chosen_tell,
+        avoids=avoids,
+        yesterday_tell=yesterday_tell,
+        drawer_changed=drawer_changed,
+    )
+
+
 def write_haiku(
     *,
     date_line: str,
@@ -103,9 +135,16 @@ def write_haiku(
     mode_name: str = "",
     mode_heat: str = "",
     mode_hint: str = "",
+    drawer_name: str = "",
+    drawer_reason: str = "",
+    chosen_tell: str = "",
+    avoids: str = "",
+    yesterday_tell: str = "",
+    drawer_changed: bool = False,
+    drawer_spec: Optional[DrawerSpec] = None,
     api_key: Optional[str] = None,
 ) -> WriteResult:
-    """One chat/completions call. Keep the first parsed three lines."""
+    """One chat call; a second only if the scrap misses the drawer tell."""
     key = (api_key if api_key is not None else resolve_api_key()).strip()
     if not key:
         return WriteResult(
@@ -115,15 +154,22 @@ def write_haiku(
             error="no XAI_API_KEY",
         )
 
-    user_text = writer_user_prompt(
+    user_text = _user_seed(
         date_line=date_line,
         weekday_vibe=weekday_vibe,
         weather_seed=weather_seed,
         mode_name=mode_name,
         mode_heat=mode_heat,
         mode_hint=mode_hint,
+        drawer_name=drawer_name,
+        drawer_reason=drawer_reason,
+        chosen_tell=chosen_tell,
+        avoids=avoids,
+        yesterday_tell=yesterday_tell,
+        drawer_changed=drawer_changed,
     )
     model = chat_model()
+    replies: List[str] = []
 
     try:
         first = _chat_complete(api_key=key, user_text=user_text)
@@ -135,12 +181,35 @@ def write_haiku(
             model=model,
             error=str(exc),
         )
-
+    replies.append(first)
     lines, haiku = parse_haiku(first)
+
+    if drawer_spec is not None and haiku:
+        problems = drawer_voice_problems(haiku, drawer_spec, chosen_tell)
+        if problems:
+            retry_text = (
+                user_text
+                + "\n\nThe previous scrap was rejected: "
+                + "; ".join(problems)
+                + ". Write three new lines that include the required tell "
+                "and drop the avoided lexicon."
+            )
+            try:
+                second = _chat_complete(api_key=key, user_text=retry_text)
+            except Exception:  # noqa: BLE001 — keep the first scrap
+                second = ""
+            if second:
+                replies.append(second)
+                retry_lines, retry_haiku = parse_haiku(second)
+                if retry_haiku and not drawer_voice_problems(
+                    retry_haiku, drawer_spec, chosen_tell
+                ):
+                    lines, haiku = retry_lines, retry_haiku
+
     return WriteResult(
         haiku=haiku,
         lines=lines,
         counts=haiku_counts(lines),
         model=model,
-        raw_replies=[first],
+        raw_replies=replies,
     )
