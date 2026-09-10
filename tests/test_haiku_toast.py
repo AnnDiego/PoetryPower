@@ -46,9 +46,18 @@ from scripts.haiku_toast.drawers import (
     DRAWERS,
     LastDrawer,
     choose_tell,
+    choose_tell_filtered,
     drawer_voice_problems,
+    extract_key_words,
+    load_last_drawer,
+    prior_mornings,
+    recent_noun_reuse,
+    recent_signature_nouns,
     save_last_drawer,
     select_drawer,
+    soft_nature_doubledip,
+    soft_nature_hits,
+    tell_collides_with_recent,
     yesterday_note,
 )
 from scripts.haiku_toast.voice_modes import (
@@ -148,6 +157,9 @@ class LockedVoiceTests(unittest.TestCase):
         self.assertIn("Heat ceiling 0–2", VOICE_BRIEF)
         self.assertIn("breakfast voltage", VOICE_BRIEF)
         self.assertIn("Do NOT regenerate for syllable counts", VOICE_BRIEF)
+        self.assertIn("Do not double-dip the soft-nature body lexicon", VOICE_BRIEF)
+        self.assertIn("recent mornings' signature nouns", VOICE_BRIEF)
+        self.assertIn("one required drawer tell", VOICE_BRIEF)
         self.assertNotIn("sassy-tender", VOICE_BRIEF)
         self.assertNotIn("Hallmark zen", VOICE_BRIEF)
 
@@ -173,7 +185,24 @@ class LockedVoiceTests(unittest.TestCase):
         self.assertIn("morning scrap", text)
         self.assertIn("do not regenerate for syllable counts", text)
         self.assertIn("Never raise chili", text)
+        self.assertIn("Do not double-dip the soft-nature body lexicon", text)
         self.assertNotIn("Write one English 5-7-5", text)
+
+    def test_writer_user_prompt_names_recent_nouns(self) -> None:
+        text = writer_user_prompt(
+            date_line="Thursday, September 10, 2026",
+            weekday_vibe="slow start",
+            weather_seed="06:30 PT hourly · code 45 fog · 62°F",
+            mode_name="verdant",
+            mode_heat="0–1",
+            chosen_tell="chimes still",
+            recent_nouns="clover, mist, toes",
+            nature_only=True,
+        )
+        self.assertIn("Do not repeat recent mornings' signature nouns: clover, mist, toes", text)
+        self.assertIn("one required tell", text)
+        self.assertIn("nature-forward", text)
+        self.assertNotIn("Prefer one weather/nature tell + one other voltage", text)
 
 
 class SyllableTests(unittest.TestCase):
@@ -525,6 +554,226 @@ class DrawerTreeTests(unittest.TestCase):
         self.assertEqual(drawer_voice_problems(good, spec, "photons on forehead"), [])
 
 
+class AntiRepetitionTests(unittest.TestCase):
+    ANN_SCRAP = (
+        "gray marine at dawn\n"
+        "sun creeps from my toes inward\n"
+        "clover drinks the mist"
+    )
+
+    def test_toes_and_clover_is_within_scrap_doubledip(self) -> None:
+        self.assertTrue(soft_nature_doubledip(self.ANN_SCRAP, "clover"))
+        self.assertIn("toes", soft_nature_hits(self.ANN_SCRAP))
+        self.assertIn("clover", soft_nature_hits(self.ANN_SCRAP))
+        self.assertIn("mist", soft_nature_hits(self.ANN_SCRAP))
+        problems = drawer_voice_problems(
+            self.ANN_SCRAP, DRAWERS[DRAWER_FOG], "clover"
+        )
+        self.assertTrue(any("double-dip" in p for p in problems))
+
+    def test_single_tell_is_not_doubledip(self) -> None:
+        scrap = "clover drinks the dew\npillow fails as a dawn-shield\nI keep the extra mug"
+        self.assertFalse(soft_nature_doubledip(scrap, "clover"))
+        self.assertEqual(
+            drawer_voice_problems(scrap, DRAWERS[DRAWER_FOG], "clover"),
+            [],
+        )
+
+    def test_hybrid_pane_toes_tell_is_not_doubledip(self) -> None:
+        tell = "pane still gray / sun finds the toes"
+        scrap = "pane still gray this hour\nsun finds the toes at last\ncoffee steams the mug"
+        self.assertFalse(soft_nature_doubledip(scrap, tell))
+        piled = scrap.replace("coffee steams the mug", "clover drinks the mist")
+        self.assertTrue(soft_nature_doubledip(piled, tell))
+
+    def test_choose_tell_skips_recent_soft_earth_when_alternatives_exist(self) -> None:
+        spec = DRAWERS[DRAWER_FOG]
+        recent = [
+            LastDrawer(
+                date="2026-09-08",
+                drawer=DRAWER_FOG,
+                tell="clover",
+                motifs=("soft_earth",),
+                key_words=("clover", "mist", "toes"),
+            )
+        ]
+        picked = {
+            choose_tell(spec, recent=recent, rng=random.Random(i))
+            for i in range(40)
+        }
+        self.assertTrue(picked)
+        self.assertTrue(picked <= set(spec.tells))
+        self.assertNotIn("clover", picked)
+        self.assertNotIn("mist", picked)
+        self.assertNotIn("pane", picked)
+        self.assertNotIn("peat", picked)
+        self.assertTrue(picked & {"chimes still", "shirt-to-skin chill", "gray concede"})
+
+    def test_choose_tell_falls_back_when_all_recent(self) -> None:
+        spec = DRAWERS[DRAWER_HYBRID]
+        recent = [
+            LastDrawer(
+                date="2026-09-07",
+                drawer=DRAWER_HYBRID,
+                tell=tell,
+                key_words=tuple(extract_key_words(tell)),
+            )
+            for tell in spec.tells
+        ]
+        picked = choose_tell(spec, recent=recent, rng=random.Random(0))
+        self.assertIn(picked, spec.tells)
+
+    def test_recent_history_skip_same_drawer_tell(self) -> None:
+        spec = DRAWERS[DRAWER_CLEAR_MILD]
+        recent = [
+            LastDrawer(
+                date="2026-09-09",
+                drawer=DRAWER_CLEAR_MILD,
+                tell="brie",
+                key_words=("brie", "coffee"),
+            )
+        ]
+        self.assertTrue(tell_collides_with_recent("brie", recent))
+        tell, skipped = choose_tell_filtered(
+            spec, recent=recent, rng=random.Random(1)
+        )
+        self.assertNotEqual(tell, "brie")
+        self.assertIn("brie", skipped)
+
+    def test_rolling_history_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            first = save_last_drawer(
+                out,
+                date="2026-09-07",
+                drawer=DRAWER_FOG,
+                tell="clover",
+                haiku=self.ANN_SCRAP,
+            )
+            self.assertTrue(first.is_file())
+            day1 = load_last_drawer(out)
+            self.assertIsNotNone(day1)
+            assert day1 is not None
+            self.assertEqual(day1.tell, "clover")
+            self.assertIn("clover", day1.key_words)
+            self.assertIn("toes", day1.key_words)
+            self.assertIn("mist", day1.key_words)
+            save_last_drawer(
+                out,
+                date="2026-09-08",
+                drawer=DRAWER_CLEAR_HOT,
+                tell="photons on forehead",
+                haiku="photons on my forehead\nthe day coaxes a shirt loose\ngold wins",
+                previous=day1,
+            )
+            day2 = load_last_drawer(out)
+            assert day2 is not None
+            prior = prior_mornings(day2, "2026-09-09")
+            self.assertEqual([m.date for m in prior], ["2026-09-08", "2026-09-07"])
+            self.assertEqual(prior[0].tell, "photons on forehead")
+            self.assertEqual(prior[1].tell, "clover")
+            save_last_drawer(
+                out,
+                date="2026-09-09",
+                drawer=DRAWER_CLEAR_MILD,
+                tell="brie",
+                haiku="first ray on the cloth\nbrie waits beside the coffee\nwet lawn keeps the ants",
+                previous=day2,
+            )
+            day3 = load_last_drawer(out)
+            assert day3 is not None
+            recent = prior_mornings(day3, "2026-09-10")
+            self.assertEqual(
+                [m.date for m in recent],
+                ["2026-09-09", "2026-09-08", "2026-09-07"],
+            )
+            nouns = recent_signature_nouns(recent)
+            self.assertIn("brie", nouns)
+            self.assertIn("photons", nouns)
+            self.assertIn("clover", nouns)
+
+    def test_recent_noun_reuse_ignores_todays_tell(self) -> None:
+        reused = recent_noun_reuse(
+            "clover drinks the dew\nyour mug still waiting\nI leave the wool alone",
+            "clover",
+            ["clover", "mist", "toes"],
+        )
+        self.assertEqual(reused, [])
+        reused = recent_noun_reuse(
+            self.ANN_SCRAP,
+            "chimes still",
+            ["clover", "mist", "toes"],
+        )
+        self.assertIn("clover", reused)
+        self.assertIn("mist", reused)
+        self.assertIn("toes", reused)
+
+    def test_writer_retries_once_on_doubledip(self) -> None:
+        from scripts.haiku_toast import writer as writer_mod
+
+        good = "clover drinks the dew\npillow fails as a dawn-shield\nI keep the extra mug"
+        replies = [self.ANN_SCRAP, good]
+
+        def _fake_chat(**_kwargs: object) -> str:
+            return replies.pop(0)
+
+        with patch.object(writer_mod, "_chat_complete", side_effect=_fake_chat):
+            with patch.object(writer_mod, "resolve_api_key", return_value="test-key"):
+                result = writer_mod.write_haiku(
+                    date_line="Thursday, September 10, 2026",
+                    weekday_vibe="slow start",
+                    weather_seed="fog",
+                    mode_name="verdant",
+                    chosen_tell="clover",
+                    recent_nouns="toes, mist",
+                    nature_only=True,
+                    drawer_spec=DRAWERS[DRAWER_FOG],
+                    api_key="test-key",
+                )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.haiku, good)
+        self.assertEqual(len(result.raw_replies), 2)
+
+    def test_report_notes_avoided_recent_motifs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            save_last_drawer(
+                out,
+                date="2026-09-08",
+                drawer=DRAWER_FOG,
+                tell="clover",
+                haiku=self.ANN_SCRAP,
+            )
+            data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+            seed = parse_open_meteo(
+                data, when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+            )
+            with patch(
+                "scripts.haiku_toast.runner.fetch_san_diego_weather",
+                return_value=seed,
+            ):
+                rc = run(
+                    [
+                        "--dry-run",
+                        "--date",
+                        "2026-09-09",
+                        "--style",
+                        "buttered",
+                        "--out-dir",
+                        str(out),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            report = next(out.glob("*_toast.md")).read_text(encoding="utf-8")
+            self.assertIn("**Avoided recent motifs:**", report)
+            self.assertIn("clover", report)
+            self.assertIn("Do not repeat recent mornings' signature nouns", report)
+            state = json.loads((out / ".last_drawer.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["drawer"], DRAWER_CLEAR_HOT)
+            self.assertTrue(state["history"])
+            self.assertEqual(state["history"][0]["tell"], "clover")
+
+
 class WeatherParseTests(unittest.TestCase):
     def test_parse_open_meteo_hourly(self) -> None:
         data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
@@ -646,6 +895,7 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("## Weather drawer", report)
         self.assertIn("CLEAR MILD", report)
         self.assertIn("**Tell:**", report)
+        self.assertIn("**Avoided recent motifs:** none yet", report)
         self.assertIn("hourly at pull hour", report)
         self.assertIn("report-only, not a gate", report)
         self.assertNotIn("target 5-7-5", report)
