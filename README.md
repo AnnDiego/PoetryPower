@@ -27,7 +27,7 @@ Enabled now:
 - `buttered` — rustic wooden board, melting butter on the toast (board default evolution). Keeper: `scripts/haiku_toast/examples/buttered.jpg`
 - `toaster_popup` — slice rising from a stainless toaster; juice or tea in the background. Keeper: `scripts/haiku_toast/examples/toaster_popup.jpg`
 
-Plate, avocado, and egg stay out of the enabled pool (plate still: `scripts/haiku_toast/examples/toast-plate.jpg`). Add a future style by appending a `ToastStyle(enabled=True)` in `scripts/haiku_toast/style_catalog.py` — no even/odd hacks.
+Plate, avocado, and egg stay out of the enabled pool (plate still: `scripts/haiku_toast/examples/toast-plate.jpg`). The canned avocado PNG is an Imagine-fail fallback only, not a catalog style. Add a future style by appending a `ToastStyle(enabled=True)` in `scripts/haiku_toast/style_catalog.py` — no even/odd hacks.
 
 Run from the repo root (with venv activated):
 python -m scripts.haiku_toast
@@ -38,9 +38,9 @@ python -m scripts.haiku_toast --seed 17
 python -m scripts.haiku_toast --mode verdant
 
 - No `XAI_API_KEY`: prompt-only (writer seed + chosen style template, keeper sample haiku).
-- With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`. Live Imagine requests **4** stills for the same prompt (`--imagine-n`, max 10), reads the burned letters (xAI vision; optional local `tesseract` if vision cannot run), and keeps the one that best matches the haiku. If every candidate fails the check, the report says so and no `*_toast.jpg` is shipped.
+- With `XAI_API_KEY`: live xAI chat/completions write, then Imagine via the shared `scripts.poem_visualizer.imagine_client.ImagineClient`. Live Imagine requests **4** stills for the same prompt (`--imagine-n`, max 10), reads the burned letters (xAI vision; optional local `tesseract` if vision cannot run), and keeps the one that best matches the haiku. If Imagine fails (API/credits/error) or every candidate fails the check, the day's haiku still ships with the canned avocado still (`scripts/haiku_toast/assets/avocado-toast-4x3.png`) — no burn-in, no invented crust lettering. The report names the fallback and why.
 - Weather: Open-Meteo (https://open-meteo.com/) **hourly at pull hour** + daily sunrise for coastal San Diego (`weather_code`, cloud, visibility, humidity, temperature, precipitation, `is_day`). Ann’s drawer tree maps sky + moisture + light — not the daily high. Chili is never raised by temperature. The toast report names the drawer, reason, and tell.
-- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when a still passes). The report records Imagine style, voice mode, weather drawer, how many candidates were scored, and which was kept (or that all failed). Generated images and `toasts/.last_drawer.json` (yesterday’s drawer/tell plus a rolling few mornings of tells/motifs) are gitignored. The writer skips recently used tells when the drawer has another option, and retries once if a scrap double-dips the soft-nature body cluster (toes + clover, mist + pane + clover).
+- Artifacts land in `toasts/` (`*_haiku.txt`, `*_toast.md`, and `*_toast.jpg` when a still passes, or `*_toast.png` on avocado fallback). The report records Imagine style, voice mode, weather drawer, how many candidates were scored, and which was kept (or that fallback was used). Generated images and `toasts/.last_drawer.json` (yesterday’s drawer/tell plus a rolling few mornings of tells/motifs) are gitignored. The writer skips recently used tells when the drawer has another option, and retries once if a scrap double-dips the soft-nature body cluster (toes + clover, mist + pane + clover).
 - Site posting, daily auto-X, Notion, and a physical toaster are follow-ups — not in this runner.
 
 Imagine templates (replace `{HAIKU}` only) live in `scripts/haiku_toast/style_catalog.py`. Both enabled templates require exactly three lines and letters that follow the crumb as Maillard browning, not printed ink.
