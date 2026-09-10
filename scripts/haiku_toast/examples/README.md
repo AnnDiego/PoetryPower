@@ -17,7 +17,7 @@ Reference looks for the local toast style catalog
 | --- | --- | --- |
 | `toast-plate.jpg` | plate (future) | Plate + coffee cup. Documented only — not catalogued, not randomly picked. |
 | `toast-board.jpg` | — | Original v1 board still. Same family as `buttered`; kept as history. Not a third enabled style. |
-| *(none yet)* | avocado (future) | Out of the pool until Ann adds a prompt + keeper. |
+| *(none yet)* | avocado (future) | Out of the pool until Ann adds a prompt + keeper. Imagine-fail fallback is the Canva Oopsie still at `scripts/haiku_toast/assets/avocado-toast-4x3.png` (OOPS! / Fresh Toast Tomorrow — not a catalog style, no haiku burn-in). |
 | *(none yet)* | egg (future) | Out of the pool until Ann adds a prompt + keeper. |
 
 Each enabled style's Imagine template replaces `{HAIKU}` only. Both
