@@ -15,8 +15,10 @@ from .drawers import (
     DRAWERS,
     MODE_DRAWER,
     DrawerDecision,
+    LastDrawer,
     attach_tell,
-    choose_tell,
+    choose_tell_filtered,
+    recent_signature_nouns,
     select_drawer,
 )
 from .weather import WeatherSeed
@@ -119,6 +121,8 @@ class ModePick:
     avoids: Sequence[str] = field(default_factory=tuple)
     yesterday_tell: Optional[str] = None
     yesterday_drawer: Optional[str] = None
+    avoided_tells: Sequence[str] = field(default_factory=tuple)
+    recent_nouns: Sequence[str] = field(default_factory=tuple)
     decision: Optional[DrawerDecision] = None
 
 
@@ -149,12 +153,14 @@ def _pick_from_decision(
     seed: Optional[int],
     yesterday_drawer: Optional[str],
     yesterday_tell: Optional[str],
+    recent: Optional[Sequence[LastDrawer]],
     rng: random.Random,
 ) -> ModePick:
     attach_tell(
         decision,
         yesterday_drawer=yesterday_drawer,
         yesterday_tell=yesterday_tell,
+        recent=recent,
         rng=rng,
     )
     mode = _BY_NAME[decision.spec.mode_name]
@@ -170,6 +176,8 @@ def _pick_from_decision(
         avoids=decision.spec.avoids,
         yesterday_tell=yesterday_tell,
         yesterday_drawer=yesterday_drawer,
+        avoided_tells=decision.avoided_tells,
+        recent_nouns=decision.recent_nouns,
         decision=decision,
     )
 
@@ -184,6 +192,7 @@ def choose_mode(
     allow_alternate: bool = True,  # unused; tree is one drawer, no alternate
     yesterday_drawer: Optional[str] = None,
     yesterday_tell: Optional[str] = None,
+    recent: Optional[Sequence[LastDrawer]] = None,
 ) -> ModePick:
     """
     Pick a voice mode.
@@ -208,16 +217,20 @@ def choose_mode(
         tell = None
         avoids: Sequence[str] = ()
         drawer_display = None
+        avoided: Sequence[str] = ()
+        nouns: Sequence[str] = recent_signature_nouns(recent or ())
         if drawer_name:
             spec = DRAWERS[drawer_name]
-            tell = choose_tell(
+            tell, skipped = choose_tell_filtered(
                 spec,
                 yesterday_drawer=yesterday_drawer,
                 yesterday_tell=yesterday_tell,
+                recent=recent,
                 rng=chooser,
             )
             avoids = spec.avoids
             drawer_display = spec.display_name
+            avoided = skipped
         return ModePick(
             mode=found,
             reason=f"`--mode {found.name}`",
@@ -229,6 +242,8 @@ def choose_mode(
             avoids=avoids,
             yesterday_tell=yesterday_tell,
             yesterday_drawer=yesterday_drawer,
+            avoided_tells=avoided,
+            recent_nouns=nouns,
         )
 
     if not weather.ok:
@@ -239,6 +254,7 @@ def choose_mode(
             seed=seed,
             yesterday_drawer=yesterday_drawer,
             yesterday_tell=yesterday_tell,
+            recent=recent,
             rng=chooser,
         )
 
@@ -249,5 +265,6 @@ def choose_mode(
         seed=seed,
         yesterday_drawer=yesterday_drawer,
         yesterday_tell=yesterday_tell,
+        recent=recent,
         rng=chooser,
     )
