@@ -73,6 +73,12 @@ def writer_user_prompt(
     mode_name: str = "",
     mode_heat: str = "",
     mode_hint: str = "",
+    drawer_name: str = "",
+    drawer_reason: str = "",
+    chosen_tell: str = "",
+    avoids: str = "",
+    yesterday_tell: str = "",
+    drawer_changed: bool = False,
 ) -> str:
     """Today's seed for the chat writer. Voice lives in the system brief."""
     lines = [
@@ -81,15 +87,34 @@ def writer_user_prompt(
         f"- Weekday vibe: {weekday_vibe}",
         f"- Weather seed: {weather_seed}",
     ]
+    if drawer_name:
+        lines.append(f"- Weather drawer: {drawer_name}")
+        if drawer_reason:
+            lines.append(f"- Drawer reason: {drawer_reason}")
     if mode_name:
         heat = f" (heat {mode_heat})" if mode_heat else ""
         lines.append(f"- Voice mode for this run: {mode_name}{heat}")
         if mode_hint:
             lines.append(f"- Mode cue: {mode_hint}")
+    if chosen_tell:
+        lines.append(
+            f"- Required tell (include this image or its key words): {chosen_tell}"
+        )
+    if avoids:
+        lines.append(f"- Avoid: {avoids}")
+    if yesterday_tell and drawer_changed:
+        lines.append(f"- Do not reuse yesterday's tell: {yesterday_tell}")
     lines += [
         "",
         "Write in the named voice mode only. Stay at that mode's heat "
-        "(ceiling is 0–2; never above 2).",
+        "(ceiling is 0–2; weather drawers stay 0–1). "
+        "Never raise chili because the air is warm — no embers, nape-yield, "
+        "or fade-to-black. temperature_2m does not raise heat.",
+        "Include the required tell. Do not describe the toast. "
+        "Do not write a generic soulmate dawn or moonbeams with no "
+        "San Diego tell.",
+        "Reject and rewrite if you used fog lexicon on a clear/hot sky, "
+        "or gray-on-the-pane on a heat-warning morning.",
         "Write one short English three-line haiku for this morning — "
         "a morning scrap. 5-7-5 or honest close is OK; do not pad; "
         "do not regenerate for syllable counts. "

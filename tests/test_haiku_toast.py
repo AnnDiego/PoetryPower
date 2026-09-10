@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import random
 import tempfile
 import unittest
 from datetime import datetime
@@ -33,13 +35,33 @@ from scripts.haiku_toast.syllables import (
     is_way_off,
     parse_haiku,
 )
+from scripts.haiku_toast.drawers import (
+    DRAWER_CLEAR_HOT,
+    DRAWER_CLEAR_MILD,
+    DRAWER_FOG,
+    DRAWER_HYBRID,
+    DRAWER_OVERCAST,
+    DRAWER_RAIN,
+    DRAWER_STARLIT,
+    DRAWERS,
+    LastDrawer,
+    choose_tell,
+    drawer_voice_problems,
+    save_last_drawer,
+    select_drawer,
+    yesterday_note,
+)
 from scripts.haiku_toast.voice_modes import (
     MODE_NAMES,
     choose_mode,
     get_mode,
-    primary_pool,
+    mode_for_drawer,
 )
-from scripts.haiku_toast.weather import WeatherSeed, parse_open_meteo
+from scripts.haiku_toast.weather import (
+    WeatherSeed,
+    fetch_san_diego_weather,
+    parse_open_meteo,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / "scripts" / "haiku_toast" / "examples"
@@ -133,17 +155,24 @@ class LockedVoiceTests(unittest.TestCase):
         text = writer_user_prompt(
             date_line="Wednesday, September 9, 2026",
             weekday_vibe="hump-day stubbornness, marine or canyon",
-            weather_seed="high 76°F / low 64°F, overcast",
-            mode_name="verdant",
+            weather_seed="06:00 PT hourly · code 0 clear · 81°F",
+            mode_name="sun_ode",
             mode_heat="0–1",
-            mode_hint="Mist, May gray / June gloom",
+            mode_hint="Sun-ode. Photons on forehead",
+            drawer_name="CLEAR HOT",
+            drawer_reason="weather_code 0, 81°F ≥ 75 at 06:00 → CLEAR HOT",
+            chosen_tell="photons on forehead",
+            avoids="gray on the pane, mist, clover-as-weather",
         )
         self.assertIn("Wednesday, September 9, 2026", text)
-        self.assertIn("high 76°F / low 64°F, overcast", text)
-        self.assertIn("Voice mode for this run: verdant", text)
+        self.assertIn("06:00 PT hourly · code 0 clear · 81°F", text)
+        self.assertIn("Voice mode for this run: sun_ode", text)
+        self.assertIn("Weather drawer: CLEAR HOT", text)
+        self.assertIn("photons on forehead", text)
         self.assertIn("three-line haiku", text)
         self.assertIn("morning scrap", text)
         self.assertIn("do not regenerate for syllable counts", text)
+        self.assertIn("Never raise chili", text)
         self.assertNotIn("Write one English 5-7-5", text)
 
 
@@ -194,47 +223,47 @@ class SyllableTests(unittest.TestCase):
         self.assertNotIn("rewrite_user_prompt", dir(writer_mod))
 
 
+TZ = ZoneInfo("America/Los_Angeles")
+FIXTURE_20260909 = REPO_ROOT / "tests" / "fixtures" / "open_meteo_20260909_sandiego.json"
+SUNRISE_0909 = datetime(2026, 9, 9, 6, 28, tzinfo=TZ)
+
+
+def _snap(**kwargs) -> WeatherSeed:
+    """Morning hourly snapshot; defaults are a mild clear 8am (CLEAR MILD)."""
+    base = dict(
+        ok=True,
+        high_f=80,
+        low_f=60,
+        condition="clear",
+        weather_code=0,
+        cloud_cover=10,
+        visibility_m=30000,
+        relative_humidity_2m=50,
+        temperature_2m=70,
+        precipitation=0.0,
+        precipitation_probability=0,
+        is_day=1,
+        sunrise=SUNRISE_0909,
+        pull_at=datetime(2026, 9, 9, 8, 0, tzinfo=TZ),
+    )
+    base.update(kwargs)
+    return WeatherSeed(**base)
+
+
 class VoiceModeTests(unittest.TestCase):
-    def test_five_locked_modes(self) -> None:
-        self.assertEqual(
-            MODE_NAMES,
-            ["verdant", "starlit_dawn", "tender", "picnic_wink", "soft_weather_soul"],
-        )
+    def test_mode_lookup_and_aliases(self) -> None:
+        self.assertIn("sun_ode", MODE_NAMES)
+        self.assertIn("hybrid_burnoff", MODE_NAMES)
+        self.assertIn("rain", MODE_NAMES)
+        self.assertIn("clear_mild", MODE_NAMES)
+        self.assertIn("tender", MODE_NAMES)
         self.assertEqual(get_mode("starlit-dawn").name, "starlit_dawn")
+        self.assertEqual(get_mode("clear_hot").name, "sun_ode")
+        self.assertEqual(get_mode("fog").name, "verdant")
         self.assertIsNone(get_mode("siren"))
 
-    def test_weather_primary_pools(self) -> None:
-        overcast = WeatherSeed(ok=True, high_f=68, low_f=58, condition="overcast")
-        names, _, reason = primary_pool(overcast)
-        self.assertEqual(set(names), {"verdant", "soft_weather_soul"})
-        self.assertIn("overcast", reason)
-
-        rain = WeatherSeed(ok=True, high_f=64, low_f=55, condition="rain")
-        names, _, reason = primary_pool(rain)
-        self.assertEqual(names, ["soft_weather_soul"])
-
-        fog = WeatherSeed(ok=True, high_f=66, low_f=57, condition="fog")
-        self.assertEqual(set(primary_pool(fog)[0]), {"verdant", "soft_weather_soul"})
-
-        cool_clear = WeatherSeed(ok=True, high_f=68, low_f=52, condition="clear")
-        early_names, early_w, early_r = primary_pool(cool_clear, hour=6)
-        self.assertEqual(set(early_names), {"starlit_dawn", "verdant"})
-        self.assertGreater(early_w["starlit_dawn"], early_w["verdant"])
-        self.assertIn("starlit_dawn weighted", early_r)
-        later_names, later_w, _ = primary_pool(cool_clear, hour=10)
-        self.assertGreater(later_w["verdant"], later_w["starlit_dawn"])
-
-        warm_clear = WeatherSeed(ok=True, high_f=78, low_f=64, condition="sunny")
-        self.assertEqual(set(primary_pool(warm_clear)[0]), {"verdant", "picnic_wink"})
-
-        windy = WeatherSeed(ok=True, high_f=70, low_f=58, condition="windy")
-        self.assertEqual(set(primary_pool(windy)[0]), {"soft_weather_soul", "verdant"})
-
-        missing = WeatherSeed(ok=False, error="--no-weather")
-        self.assertEqual(set(primary_pool(missing)[0]), set(MODE_NAMES))
-
     def test_choose_mode_override_and_unknown(self) -> None:
-        weather = WeatherSeed(ok=True, high_f=70, low_f=58, condition="rain")
+        weather = _snap(weather_code=61, precipitation=0.2)
         pick = choose_mode(weather, name="tender")
         self.assertEqual(pick.mode.name, "tender")
         self.assertEqual(pick.selection, "cli")
@@ -243,28 +272,288 @@ class VoiceModeTests(unittest.TestCase):
             choose_mode(weather, name="siren")
         self.assertIn("Unknown voice mode", str(ctx.exception))
 
-    def test_failed_weather_random_stays_in_five_modes(self) -> None:
+    def test_failed_weather_falls_back_to_clear_mild(self) -> None:
         missing = WeatherSeed(ok=False, error="unavailable")
-        names = {
-            choose_mode(missing, seed=i, allow_alternate=False).mode.name
-            for i in range(40)
-        }
-        self.assertTrue(names <= set(MODE_NAMES))
-        self.assertEqual(names, set(MODE_NAMES))
+        pick = choose_mode(missing, seed=3)
+        self.assertEqual(pick.mode.name, "clear_mild")
+        self.assertEqual(pick.selection, "fallback")
+        self.assertEqual(pick.drawer, DRAWER_CLEAR_MILD)
+        self.assertEqual(pick.mode.heat, "0–1")
+
+    def test_rain_hourly_is_rain_mode(self) -> None:
+        rain = _snap(weather_code=61, precipitation=0.4, temperature_2m=64)
+        pick = choose_mode(rain, seed=1)
+        self.assertEqual(pick.mode.name, "rain")
+        self.assertEqual(pick.selection, "weather")
+        self.assertEqual(pick.drawer, DRAWER_RAIN)
+        self.assertEqual(pick.mode.heat, "0–1")
+
+
+class DrawerTreeTests(unittest.TestCase):
+    def _name(self, **kwargs) -> str:
+        return select_drawer(_snap(**kwargs)).name
+
+    def test_rain_from_precip_and_from_code(self) -> None:
+        self.assertEqual(self._name(precipitation=0.2, weather_code=0), DRAWER_RAIN)
+        self.assertEqual(self._name(precipitation=0, weather_code=61), DRAWER_RAIN)
+        self.assertEqual(self._name(precipitation=0, weather_code=80), DRAWER_RAIN)
+        self.assertEqual(self._name(precipitation=0, weather_code=95), DRAWER_RAIN)
+        reason = select_drawer(_snap(precipitation=0.4, weather_code=0)).reason
+        self.assertIn("RAIN", reason)
+        self.assertIn("precipitation", reason)
+
+    def test_fog_from_code_and_from_vis_rh(self) -> None:
+        self.assertEqual(self._name(weather_code=45, precipitation=0), DRAWER_FOG)
+        self.assertEqual(self._name(weather_code=48, precipitation=0), DRAWER_FOG)
         self.assertEqual(
-            choose_mode(missing, seed=3).mode.name,
-            choose_mode(missing, seed=3).mode.name,
+            self._name(
+                weather_code=1,
+                precipitation=0,
+                visibility_m=1500,
+                relative_humidity_2m=88,
+            ),
+            DRAWER_FOG,
+        )
+        # Rain wins if both signals fire.
+        self.assertEqual(
+            self._name(
+                weather_code=45,
+                precipitation=0.1,
+                visibility_m=1500,
+                relative_humidity_2m=90,
+            ),
+            DRAWER_RAIN,
         )
 
-    def test_rain_primary_without_alternate_is_weather_soul(self) -> None:
-        rain = WeatherSeed(ok=True, high_f=64, low_f=55, condition="rain")
-        pick = choose_mode(rain, seed=1, allow_alternate=False)
-        self.assertEqual(pick.mode.name, "soft_weather_soul")
-        self.assertEqual(pick.selection, "weather")
+    def test_overcast_from_code_and_cloud(self) -> None:
+        self.assertEqual(
+            self._name(weather_code=3, precipitation=0, cloud_cover=70),
+            DRAWER_OVERCAST,
+        )
+        self.assertEqual(
+            self._name(weather_code=2, precipitation=0, cloud_cover=90),
+            DRAWER_OVERCAST,
+        )
+
+    def test_hybrid_burnoff(self) -> None:
+        self.assertEqual(
+            self._name(
+                weather_code=2,
+                cloud_cover=55,
+                temperature_2m=74,
+                precipitation=0,
+                is_day=1,
+                pull_at=datetime(2026, 9, 9, 8, 0, tzinfo=TZ),
+            ),
+            DRAWER_HYBRID,
+        )
+        # Too cool at pull → not hybrid.
+        self.assertEqual(
+            self._name(
+                weather_code=2,
+                cloud_cover=55,
+                temperature_2m=70,
+                precipitation=0,
+                is_day=1,
+                pull_at=datetime(2026, 9, 9, 8, 0, tzinfo=TZ),
+            ),
+            DRAWER_CLEAR_MILD,
+        )
+
+    def test_clear_hot(self) -> None:
+        self.assertEqual(
+            self._name(
+                weather_code=0,
+                temperature_2m=81,
+                precipitation=0,
+                cloud_cover=0,
+                is_day=0,
+                pull_at=datetime(2026, 9, 9, 6, 0, tzinfo=TZ),
+            ),
+            DRAWER_CLEAR_HOT,
+        )
+        self.assertEqual(
+            self._name(
+                weather_code=1,
+                temperature_2m=75,
+                precipitation=0,
+                is_day=1,
+            ),
+            DRAWER_CLEAR_HOT,
+        )
+
+    def test_starlit_dawn(self) -> None:
+        # Clear + cool + still dark → starlit (CLEAR HOT needs ≥75).
+        self.assertEqual(
+            self._name(
+                weather_code=0,
+                temperature_2m=68,
+                precipitation=0,
+                cloud_cover=5,
+                is_day=0,
+                pull_at=datetime(2026, 9, 9, 6, 0, tzinfo=TZ),
+            ),
+            DRAWER_STARLIT,
+        )
+        # After sunrise but within 40 min, moon/Venus override.
+        self.assertEqual(
+            self._name(
+                weather_code=1,
+                temperature_2m=68,
+                precipitation=0,
+                is_day=1,
+                pull_at=datetime(2026, 9, 9, 6, 50, tzinfo=TZ),
+                bodies_up=True,
+            ),
+            DRAWER_STARLIT,
+        )
+        # After the dawn window → mild, not starlit.
+        self.assertEqual(
+            self._name(
+                weather_code=0,
+                temperature_2m=68,
+                precipitation=0,
+                is_day=1,
+                pull_at=datetime(2026, 9, 9, 8, 0, tzinfo=TZ),
+                bodies_up=True,
+            ),
+            DRAWER_CLEAR_MILD,
+        )
+
+    def test_clear_mild_else(self) -> None:
+        self.assertEqual(
+            self._name(
+                weather_code=0,
+                temperature_2m=70,
+                precipitation=0,
+                is_day=1,
+                pull_at=datetime(2026, 9, 9, 8, 0, tzinfo=TZ),
+            ),
+            DRAWER_CLEAR_MILD,
+        )
+        self.assertEqual(
+            self._name(
+                weather_code=2,
+                cloud_cover=20,
+                temperature_2m=70,
+                precipitation=0,
+                is_day=1,
+            ),
+            DRAWER_CLEAR_MILD,
+        )
+
+    def test_2026_09_09_clear_hot_fixture(self) -> None:
+        data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        when = datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        seed = parse_open_meteo(data, when=when)
+        self.assertTrue(seed.ok)
+        self.assertEqual(seed.weather_code, 0)
+        self.assertGreaterEqual(seed.temperature_2m, 75)
+        self.assertEqual(seed.pull_at.hour, 6)
+        self.assertEqual(seed.high_f, 95)
+        # Daily weather_code 2 must not steal the morning drawer.
+        self.assertEqual(data["daily"]["weather_code"][0], 2)
+        decision = select_drawer(seed)
+        self.assertEqual(decision.name, DRAWER_CLEAR_HOT)
+        self.assertIn("CLEAR HOT", decision.reason)
+        self.assertIn("morning hourly", decision.reason)
+        pick = choose_mode(seed, seed=1)
+        self.assertEqual(pick.mode.name, "sun_ode")
+        self.assertEqual(pick.mode.heat, "0–1")
+        self.assertEqual(pick.drawer, DRAWER_CLEAR_HOT)
+        self.assertNotIn("heat 2", pick.reason.lower())
+
+    def test_temperature_never_raises_heat(self) -> None:
+        hot = _snap(weather_code=0, temperature_2m=105, precipitation=0)
+        pick = choose_mode(hot, seed=1)
+        self.assertEqual(pick.mode.heat, "0–1")
+        for name in DRAWERS:
+            self.assertEqual(mode_for_drawer(name).heat, "0–1")
+            self.assertEqual(DRAWERS[name].heat, "0–1")
+
+    def test_prefer_morning_over_afternoon_daily(self) -> None:
+        # Socked-in morning, even if we stash a blazing daily high.
+        morning = _snap(
+            weather_code=3,
+            cloud_cover=95,
+            temperature_2m=64,
+            high_f=92,
+            precipitation=0,
+        )
+        self.assertEqual(select_drawer(morning).name, DRAWER_OVERCAST)
+
+    def test_yesterday_tell_skipped_when_drawer_changes(self) -> None:
+        spec = DRAWERS[DRAWER_CLEAR_HOT]
+        reused = choose_tell(
+            spec,
+            yesterday_drawer=DRAWER_FOG,
+            yesterday_tell="photons on forehead",
+            rng=random.Random(0),
+        )
+        self.assertNotEqual(reused, "photons on forehead")
+        # Same drawer may reuse.
+        same = choose_tell(
+            spec,
+            yesterday_drawer=DRAWER_CLEAR_HOT,
+            yesterday_tell="photons on forehead",
+            rng=random.Random(0),
+        )
+        self.assertIn(same, spec.tells)
+
+    def test_drawer_state_is_previous_day_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)
+            save_last_drawer(
+                path, date="2026-09-09", drawer=DRAWER_FOG, tell="mist"
+            )
+            y_d, y_t = yesterday_note(
+                LastDrawer("2026-09-09", DRAWER_FOG, "mist"), "2026-09-10"
+            )
+            self.assertEqual((y_d, y_t), (DRAWER_FOG, "mist"))
+            same_day = yesterday_note(
+                LastDrawer("2026-09-10", DRAWER_FOG, "mist"), "2026-09-10"
+            )
+            self.assertEqual(same_day, (None, None))
+
+    def test_writer_rejects_clear_hot_fog_lexicon(self) -> None:
+        spec = DRAWERS[DRAWER_CLEAR_HOT]
+        bad = "gray still on the pane\nmist in the clover\nsoulmate moonbeams"
+        problems = drawer_voice_problems(bad, spec, "photons on forehead")
+        self.assertTrue(any("tell" in p for p in problems))
+        self.assertTrue(any("pane" in p or "fog" in p for p in problems))
+        good = "photons on my forehead\nthe day coaxes a shirt loose\ngold wins"
+        self.assertEqual(drawer_voice_problems(good, spec, "photons on forehead"), [])
 
 
 class WeatherParseTests(unittest.TestCase):
-    def test_parse_open_meteo_daily(self) -> None:
+    def test_parse_open_meteo_hourly(self) -> None:
+        data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        seed = parse_open_meteo(
+            data, when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        )
+        self.assertTrue(seed.ok)
+        self.assertEqual(seed.weather_code, 0)
+        self.assertEqual(seed.condition, "clear")
+        self.assertAlmostEqual(seed.temperature_2m, 81.4)
+        self.assertEqual(seed.cloud_cover, 0)
+        self.assertEqual(seed.visibility_m, 33900)
+        self.assertEqual(seed.relative_humidity_2m, 54)
+        self.assertEqual(seed.precipitation, 0)
+        self.assertEqual(seed.is_day, 0)
+        self.assertEqual(seed.sunrise.hour, 6)
+        self.assertEqual(seed.sunrise.minute, 28)
+        self.assertEqual(seed.high_f, 95)
+        self.assertEqual(seed.low_f, 74)
+        self.assertIn("06:00 PT hourly", seed.seed_line())
+        self.assertIn("code 0", seed.seed_line())
+        self.assertEqual(seed.source, "Open-Meteo")
+
+    def test_parse_failure_is_soft(self) -> None:
+        seed = parse_open_meteo({})
+        self.assertFalse(seed.ok)
+        self.assertIn("unavailable", seed.seed_line())
+
+    def test_daily_only_payload_is_unavailable(self) -> None:
         seed = parse_open_meteo(
             {
                 "daily": {
@@ -274,17 +563,42 @@ class WeatherParseTests(unittest.TestCase):
                 }
             }
         )
-        self.assertTrue(seed.ok)
-        self.assertEqual(seed.high_f, 76)
-        self.assertEqual(seed.low_f, 64)
-        self.assertEqual(seed.condition, "overcast")
-        self.assertIn("high 76°F / low 64°F, overcast", seed.seed_line())
-        self.assertEqual(seed.source, "Open-Meteo")
-
-    def test_parse_failure_is_soft(self) -> None:
-        seed = parse_open_meteo({})
         self.assertFalse(seed.ok)
-        self.assertIn("unavailable", seed.seed_line())
+        self.assertIn("hourly", seed.error or "")
+
+    def test_fetch_asks_for_hourly_not_daily_code(self) -> None:
+        try:
+            import requests  # noqa: F401
+        except ImportError:
+            self.skipTest("requests not installed")
+
+        class _Resp:
+            status_code = 200
+
+            def json(self) -> dict:
+                return json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+
+        with patch("requests.get", return_value=_Resp()) as get:
+            seed = fetch_san_diego_weather(
+                when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+            )
+        self.assertTrue(seed.ok)
+        params = get.call_args.kwargs.get("params") or get.call_args[1]
+        hourly = params["hourly"]
+        daily = params["daily"]
+        for field in (
+            "weather_code",
+            "cloud_cover",
+            "visibility",
+            "relative_humidity_2m",
+            "temperature_2m",
+            "precipitation",
+            "precipitation_probability",
+            "is_day",
+        ):
+            self.assertIn(field, hourly)
+        self.assertIn("sunrise", daily)
+        self.assertNotIn("weather_code", daily.split(","))
 
 
 class DateAndDryRunTests(unittest.TestCase):
@@ -329,6 +643,10 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("Poetess Ann", report)
         self.assertIn("Sensual-cosmic lyric", report)
         self.assertIn("## Voice mode", report)
+        self.assertIn("## Weather drawer", report)
+        self.assertIn("CLEAR MILD", report)
+        self.assertIn("**Tell:**", report)
+        self.assertIn("hourly at pull hour", report)
         self.assertIn("report-only, not a gate", report)
         self.assertNotIn("target 5-7-5", report)
         self.assertIn("Dry run: **yes**", report)
@@ -356,7 +674,8 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertRegex(chosen_a[0], r"`(buttered|toaster_popup)`")
         self.assertRegex(
             chosen_a[1],
-            r"`(verdant|starlit_dawn|tender|picnic_wink|soft_weather_soul)`",
+            r"`(verdant|starlit_dawn|tender|picnic_wink|soft_weather_soul|"
+            r"hybrid_burnoff|sun_ode|rain|clear_mild)`",
         )
         self.assertIn("`--seed 7`", report_a)
         self.assertIn("random among enabled", report_a)
@@ -368,6 +687,41 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("`--mode tender`", report)
         self.assertIn("stainless steel toaster", report)
         self.assertIn("Voice mode for this run: tender", report)
+
+    def test_dry_run_fixture_names_clear_hot_drawer(self) -> None:
+        data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        seed = parse_open_meteo(
+            data, when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "scripts.haiku_toast.runner.fetch_san_diego_weather",
+                return_value=seed,
+            ):
+                rc = run(
+                    [
+                        "--dry-run",
+                        "--date",
+                        "2026-09-09",
+                        "--style",
+                        "buttered",
+                        "--out-dir",
+                        tmp,
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            report = next(Path(tmp).glob("*_toast.md")).read_text(encoding="utf-8")
+            self.assertIn("CLEAR HOT", report)
+            self.assertIn("mode `sun_ode`", report)
+            self.assertIn("## Weather drawer", report)
+            self.assertIn("morning hourly", report)
+            self.assertIn("not used for the drawer or chili", report)
+            self.assertIn("heat 0–1", report)
+            self.assertNotIn("high/low °F + one condition word", report)
+            state = Path(tmp) / ".last_drawer.json"
+            self.assertTrue(state.is_file())
+            saved = json.loads(state.read_text(encoding="utf-8"))
+            self.assertEqual(saved["drawer"], DRAWER_CLEAR_HOT)
 
     def test_unknown_mode_exits(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

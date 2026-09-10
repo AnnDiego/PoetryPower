@@ -216,4 +216,5 @@ scripts/private/
 /toasts/*.jpeg
 /toasts/*.png
 /toasts/*.webp
+/toasts/.last_drawer.json
 
