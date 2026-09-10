@@ -8,4 +8,4 @@ the local catalog (random among enabled, or --style). Voice mode is
 separate.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"

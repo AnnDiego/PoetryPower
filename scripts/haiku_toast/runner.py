@@ -63,7 +63,9 @@ from .style_catalog import (
 from .syllables import counts_label, haiku_counts, parse_haiku
 from .drawers import (
     DRAWERS,
+    NATURE_ONLY_DRAWERS,
     load_last_drawer,
+    prior_mornings,
     save_last_drawer,
     yesterday_note,
 )
@@ -303,6 +305,17 @@ def render_report(result: RunResult) -> str:
         f"- **Drawer:** {drawer_name}",
         f"- **Reason:** {mode_reason}",
         f"- **Tell:** {tell}",
+    ]
+    if voice is not None and voice.recent_nouns:
+        avoided = ", ".join(voice.recent_nouns)
+        lines.append(f"- **Avoided recent motifs:** {avoided}")
+    elif voice is not None:
+        lines.append("- **Avoided recent motifs:** none yet")
+    if voice is not None and voice.avoided_tells:
+        lines.append(
+            "- **Skipped drawer tells:** " + ", ".join(voice.avoided_tells)
+        )
+    lines += [
         "",
         "## Haiku",
         "",
@@ -550,7 +563,9 @@ def run(argv: Optional[List[str]] = None) -> int:
         print(f"  {weather.seed_line()}")
 
     today = when.date().isoformat()
-    y_drawer, y_tell = yesterday_note(load_last_drawer(out_dir), today)
+    prior_state = load_last_drawer(out_dir)
+    y_drawer, y_tell = yesterday_note(prior_state, today)
+    recent = prior_mornings(prior_state, today)
     try:
         voice = choose_mode(
             weather,
@@ -559,6 +574,7 @@ def run(argv: Optional[List[str]] = None) -> int:
             seed=None if args.mode else args.seed,
             yesterday_drawer=y_drawer,
             yesterday_tell=y_tell,
+            recent=recent,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
@@ -567,11 +583,17 @@ def run(argv: Optional[List[str]] = None) -> int:
     print(f"  Mode: {voice.mode.name}  ({voice.reason})")
     if voice.tell:
         print(f"  Tell: {voice.tell}")
+    if voice.recent_nouns:
+        print(f"  Avoiding recent motifs: {', '.join(voice.recent_nouns)}")
     print()
 
     key = resolve_api_key()
     dry = bool(args.dry_run or not key)
     notes: List[str] = []
+    if voice.recent_nouns:
+        notes.append(
+            "Avoided recent motifs: " + ", ".join(voice.recent_nouns)
+        )
     write: Optional[WriteResult] = None
     wrote_live = False
 
@@ -612,6 +634,8 @@ def run(argv: Optional[List[str]] = None) -> int:
                 and voice.drawer
                 and voice.yesterday_drawer != voice.drawer
             ),
+            recent_nouns=", ".join(voice.recent_nouns),
+            nature_only=bool(voice.drawer and voice.drawer in NATURE_ONLY_DRAWERS),
             drawer_spec=DRAWERS.get(voice.drawer or ""),
             api_key=key,
         )
@@ -660,6 +684,8 @@ def run(argv: Optional[List[str]] = None) -> int:
                 and voice.drawer
                 and voice.yesterday_drawer != voice.drawer
             ),
+            recent_nouns=", ".join(voice.recent_nouns),
+            nature_only=bool(voice.drawer and voice.drawer in NATURE_ONLY_DRAWERS),
         )
         notes.append("Writer system brief + user seed saved in this report's notes.")
         print("─" * 56)
@@ -750,7 +776,12 @@ def run(argv: Optional[List[str]] = None) -> int:
     )
     if voice.drawer and voice.tell:
         save_last_drawer(
-            out_dir, date=today, drawer=voice.drawer, tell=voice.tell
+            out_dir,
+            date=today,
+            drawer=voice.drawer,
+            tell=voice.tell,
+            haiku=haiku,
+            previous=prior_state,
         )
 
     print("─" * 56)

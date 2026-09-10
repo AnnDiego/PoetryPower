@@ -110,6 +110,8 @@ def _user_seed(
     avoids: str,
     yesterday_tell: str,
     drawer_changed: bool,
+    recent_nouns: str = "",
+    nature_only: bool = False,
 ) -> str:
     return writer_user_prompt(
         date_line=date_line,
@@ -124,6 +126,8 @@ def _user_seed(
         avoids=avoids,
         yesterday_tell=yesterday_tell,
         drawer_changed=drawer_changed,
+        recent_nouns=recent_nouns,
+        nature_only=nature_only,
     )
 
 
@@ -141,10 +145,12 @@ def write_haiku(
     avoids: str = "",
     yesterday_tell: str = "",
     drawer_changed: bool = False,
+    recent_nouns: str = "",
+    nature_only: bool = False,
     drawer_spec: Optional[DrawerSpec] = None,
     api_key: Optional[str] = None,
 ) -> WriteResult:
-    """One chat call; a second only if the scrap misses the drawer tell."""
+    """One chat call; a second only if the scrap fails drawer voice checks."""
     key = (api_key if api_key is not None else resolve_api_key()).strip()
     if not key:
         return WriteResult(
@@ -167,9 +173,12 @@ def write_haiku(
         avoids=avoids,
         yesterday_tell=yesterday_tell,
         drawer_changed=drawer_changed,
+        recent_nouns=recent_nouns,
+        nature_only=nature_only,
     )
     model = chat_model()
     replies: List[str] = []
+    recent_list = [n.strip() for n in recent_nouns.split(",") if n.strip()]
 
     try:
         first = _chat_complete(api_key=key, user_text=user_text)
@@ -185,14 +194,17 @@ def write_haiku(
     lines, haiku = parse_haiku(first)
 
     if drawer_spec is not None and haiku:
-        problems = drawer_voice_problems(haiku, drawer_spec, chosen_tell)
+        problems = drawer_voice_problems(
+            haiku, drawer_spec, chosen_tell, recent_nouns=recent_list
+        )
         if problems:
             retry_text = (
                 user_text
                 + "\n\nThe previous scrap was rejected: "
                 + "; ".join(problems)
-                + ". Write three new lines that include the required tell "
-                "and drop the avoided lexicon."
+                + ". Write three new lines that include the one required tell, "
+                "drop the avoided lexicon, and do not double-dip the "
+                "soft-nature body cluster or repeat recent signature nouns."
             )
             try:
                 second = _chat_complete(api_key=key, user_text=retry_text)
@@ -202,7 +214,10 @@ def write_haiku(
                 replies.append(second)
                 retry_lines, retry_haiku = parse_haiku(second)
                 if retry_haiku and not drawer_voice_problems(
-                    retry_haiku, drawer_spec, chosen_tell
+                    retry_haiku,
+                    drawer_spec,
+                    chosen_tell,
+                    recent_nouns=recent_list,
                 ):
                     lines, haiku = retry_lines, retry_haiku
 
