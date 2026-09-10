@@ -1325,7 +1325,9 @@ class AvocadoFallbackTests(unittest.TestCase):
             self.assertIn("no burn-in", note.lower())
             self.assertFalse(dest.exists())
 
-    def _live_fail(self, extra: list[str], *, note: str, tried: int) -> tuple[Path, str, str]:
+    def _live_fail(
+        self, extra: list[str], *, note: str, tried: int
+    ) -> tuple[bytes, str, str, str]:
         from scripts.haiku_toast.legibility import PickResult
 
         empty = PickResult(ok=False, tried=tried, note=note)
@@ -1360,18 +1362,20 @@ class AvocadoFallbackTests(unittest.TestCase):
             self.assertEqual(len(images), 1)
             self.assertFalse(list(out.glob("*_toast.jpg")))
             return (
-                images[0],
+                images[0].read_bytes(),
+                str(images[0]),
                 haikus[0].read_text(encoding="utf-8"),
                 reports[0].read_text(encoding="utf-8"),
             )
 
     def test_imagine_api_failure_ships_avocado_fallback(self) -> None:
-        image, haiku, report = self._live_fail(
+        image_bytes, image_path, haiku, report = self._live_fail(
             [],
             note="Imagine failed: 403 credits exhausted",
             tried=0,
         )
-        self.assertEqual(image.read_bytes(), FALLBACK_STILL_PATH.read_bytes())
+        self.assertEqual(image_bytes, FALLBACK_STILL_PATH.read_bytes())
+        self.assertTrue(image_path.endswith("_toast.png"))
         self.assertIn("Harbor light, leftover", haiku)
         self.assertIn("Imagine: **fallback (canned avocado still)**", report)
         self.assertIn("Imagine fallback used", report)
@@ -1380,10 +1384,10 @@ class AvocadoFallbackTests(unittest.TestCase):
         self.assertIn("Harbor light, leftover", report)
         self.assertIn("`--style buttered`", report)
         self.assertIn("Image:", report)
-        self.assertIn(str(image), report)
+        self.assertIn(image_path, report)
 
     def test_imagine_no_passer_ships_avocado_fallback(self) -> None:
-        image, haiku, report = self._live_fail(
+        image_bytes, image_path, haiku, report = self._live_fail(
             ["--imagine-n", "3"],
             note=(
                 "Imagine: all 3 candidate(s) failed the burn-in check "
@@ -1391,7 +1395,8 @@ class AvocadoFallbackTests(unittest.TestCase):
             ),
             tried=3,
         )
-        self.assertEqual(image.read_bytes(), FALLBACK_STILL_PATH.read_bytes())
+        self.assertEqual(image_bytes, FALLBACK_STILL_PATH.read_bytes())
+        self.assertTrue(image_path.endswith("_toast.png"))
         self.assertIn("Harbor light, leftover", haiku)
         self.assertIn("Imagine: **fallback (canned avocado still)**", report)
         self.assertIn("none passed (requested 3) — shipped canned avocado still", report)
