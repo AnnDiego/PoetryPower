@@ -17,7 +17,14 @@ from scripts.haiku_toast.prompts import (
     VOICE_SEED_PATH,
     writer_user_prompt,
 )
-from scripts.haiku_toast.runner import format_date_line, render_report, run, RunResult
+from scripts.haiku_toast.runner import (
+    FALLBACK_STILL_PATH,
+    format_date_line,
+    render_report,
+    run,
+    ship_avocado_fallback,
+    RunResult,
+)
 from scripts.haiku_toast.style_catalog import (
     BUTTERED_TEMPLATE,
     TOASTER_POPUP_TEMPLATE,
@@ -1194,6 +1201,31 @@ class LegibilityTests(unittest.TestCase):
         self.assertIn("Imagine: **failed (no legible burn-in)**", failed)
         self.assertIn("none passed (requested 4) — still not shipped", failed)
 
+        fallback = render_report(
+            RunResult(
+                **{
+                    **base,
+                    "imagined": False,
+                    "imagine_kept": None,
+                    "image_url": None,
+                    "imagine_fallback": True,
+                    "notes": [
+                        "Imagine: all 4 candidate(s) failed the burn-in check "
+                        "(garbled / wrong words) — not shipping a still.",
+                        "Imagine fallback used: all 4 failed. "
+                        "Shipped canned avocado-toast still "
+                        "(no burn-in, no invented crust lettering).",
+                    ],
+                }
+            )
+        )
+        self.assertIn("Imagine: **fallback (canned avocado still)**", fallback)
+        self.assertIn("Fallback: **yes**", fallback)
+        self.assertIn("avocado-toast-4x3.png", fallback)
+        self.assertIn("no invented crust lettering", fallback.lower())
+        self.assertIn("shipped canned avocado still", fallback)
+        self.assertIn("Imagine fallback used", fallback)
+
     def test_maybe_imagine_does_not_ship_garbage(self) -> None:
         from scripts.haiku_toast.legibility import ExtractResult
         from scripts.haiku_toast.runner import _maybe_imagine
@@ -1265,6 +1297,137 @@ class LegibilityTests(unittest.TestCase):
             self.assertEqual(pick.kept_index, 2)
             self.assertIn("kept candidate #2", note)
             self.assertFalse(list(Path(tmp).glob("*_cand*")))
+
+
+class AvocadoFallbackTests(unittest.TestCase):
+    """Live Imagine fail / no-passer → canned avocado still + report note."""
+
+    SUPPLIED = (
+        "Harbor light, leftover\nramen steam on the laptop\nPadres night crumbs"
+    )
+
+    def test_fallback_asset_is_tracked_png(self) -> None:
+        self.assertTrue(FALLBACK_STILL_PATH.is_file(), f"missing {FALLBACK_STILL_PATH}")
+        data = FALLBACK_STILL_PATH.read_bytes()
+        self.assertTrue(data.startswith(b"\x89PNG\r\n\x1a\n"), "must be a PNG")
+        self.assertGreater(len(data), 1000)
+
+    def test_ship_avocado_fallback_copies_bytes_verbatim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "20260910-0800_toast.jpg"
+            path, note = ship_avocado_fallback(
+                dest, reason="Imagine failed: credits exhausted"
+            )
+            self.assertEqual(path.suffix, ".png")
+            self.assertEqual(path.read_bytes(), FALLBACK_STILL_PATH.read_bytes())
+            self.assertIn("Imagine fallback used", note)
+            self.assertIn("credits exhausted", note)
+            self.assertIn("no burn-in", note.lower())
+            self.assertFalse(dest.exists())
+
+    def _live_fail(
+        self, extra: list[str], *, note: str, tried: int
+    ) -> tuple[bytes, str, str, str]:
+        from scripts.haiku_toast.legibility import PickResult
+
+        empty = PickResult(ok=False, tried=tried, note=note)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            with patch(
+                "scripts.haiku_toast.runner.resolve_api_key", return_value="test-key"
+            ), patch(
+                "scripts.haiku_toast.runner._maybe_imagine",
+                return_value=(None, None, note, empty),
+            ):
+                rc = run(
+                    [
+                        "--no-weather",
+                        "--date",
+                        "2026-09-09",
+                        "--style",
+                        "buttered",
+                        "--haiku",
+                        self.SUPPLIED.replace("\n", "\\n"),
+                        "--out-dir",
+                        str(out),
+                        *extra,
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            haikus = list(out.glob("*_haiku.txt"))
+            reports = list(out.glob("*_toast.md"))
+            images = list(out.glob("*_toast.png"))
+            self.assertEqual(len(haikus), 1)
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(len(images), 1)
+            self.assertFalse(list(out.glob("*_toast.jpg")))
+            return (
+                images[0].read_bytes(),
+                str(images[0]),
+                haikus[0].read_text(encoding="utf-8"),
+                reports[0].read_text(encoding="utf-8"),
+            )
+
+    def test_imagine_api_failure_ships_avocado_fallback(self) -> None:
+        image_bytes, image_path, haiku, report = self._live_fail(
+            [],
+            note="Imagine failed: 403 credits exhausted",
+            tried=0,
+        )
+        self.assertEqual(image_bytes, FALLBACK_STILL_PATH.read_bytes())
+        self.assertTrue(image_path.endswith("_toast.png"))
+        self.assertIn("Harbor light, leftover", haiku)
+        self.assertIn("Imagine: **fallback (canned avocado still)**", report)
+        self.assertIn("Imagine fallback used", report)
+        self.assertIn("403 credits exhausted", report)
+        self.assertIn("no invented crust lettering", report.lower())
+        self.assertIn("Harbor light, leftover", report)
+        self.assertIn("`--style buttered`", report)
+        self.assertIn("Image:", report)
+        self.assertIn(image_path, report)
+
+    def test_imagine_no_passer_ships_avocado_fallback(self) -> None:
+        image_bytes, image_path, haiku, report = self._live_fail(
+            ["--imagine-n", "3"],
+            note=(
+                "Imagine: all 3 candidate(s) failed the burn-in check "
+                "(garbled / wrong words) — not shipping a still."
+            ),
+            tried=3,
+        )
+        self.assertEqual(image_bytes, FALLBACK_STILL_PATH.read_bytes())
+        self.assertTrue(image_path.endswith("_toast.png"))
+        self.assertIn("Harbor light, leftover", haiku)
+        self.assertIn("Imagine: **fallback (canned avocado still)**", report)
+        self.assertIn("none passed (requested 3) — shipped canned avocado still", report)
+        self.assertIn("garbled / wrong words", report)
+        self.assertIn("Imagine fallback used", report)
+
+    def test_no_imagine_does_not_ship_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            with patch(
+                "scripts.haiku_toast.runner.resolve_api_key", return_value="test-key"
+            ):
+                rc = run(
+                    [
+                        "--no-imagine",
+                        "--no-weather",
+                        "--style",
+                        "buttered",
+                        "--haiku",
+                        self.SUPPLIED.replace("\n", "\\n"),
+                        "--out-dir",
+                        str(out),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            self.assertFalse(list(out.glob("*.png")))
+            self.assertFalse(list(out.glob("*.jpg")))
+            report = next(out.glob("*_toast.md")).read_text(encoding="utf-8")
+            self.assertIn("Imagine skipped (--no-imagine)", report)
+            self.assertNotIn("Imagine fallback used", report)
+            self.assertIn("Harbor light, leftover", report)
 
 
 class KeeperStillsTests(unittest.TestCase):
