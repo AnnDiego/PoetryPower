@@ -26,7 +26,7 @@ Locked voice seed: `scripts/haiku_toast/VOICE_SEED.md` (loaded as the writer sys
 Enabled now:
 - `buttered` — rustic wooden board, melting butter on the toast (board default evolution). Keeper: `scripts/haiku_toast/examples/buttered.jpg`
 - `toaster_popup` — slice rising from a stainless toaster; juice or tea in the background. Keeper: `scripts/haiku_toast/examples/toaster_popup.jpg`
-- `egg_plate` — toast atop a plate of fried eggs and bacon, melting butter on the toast. Keeper: `scripts/haiku_toast/examples/egg_plate.jpg`
+- `egg_plate` — toast atop a plate of fried eggs and bacon, melting butter on the toast. Keepers: `scripts/haiku_toast/examples/egg_plate.jpg`, `scripts/haiku_toast/examples/egg_plate-2.jpg`
 
 Plate-with-coffee and avocado stay out of the enabled pool (plate still: `scripts/haiku_toast/examples/toast-plate.jpg`). The canned avocado PNG is an Imagine-fail fallback only, not a catalog style. Add a future style by appending a `ToastStyle(enabled=True)` in `scripts/haiku_toast/style_catalog.py` — no even/odd hacks.
 

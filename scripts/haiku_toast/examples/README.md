@@ -10,7 +10,8 @@ Reference looks for the local toast style catalog
 | --- | --- | --- |
 | `buttered.jpg` | `buttered` | **Enabled.** Board default evolution: rustic wooden board, warm sidelight, faint steam, melting butter on the toast, haiku burned into the crumb as Maillard browning. |
 | `toaster_popup.jpg` | `toaster_popup` | **Enabled.** Slice rising from a stainless toaster; orange juice or tea in the soft background. Same burned-in three-line haiku. |
-| `egg_plate.jpg` | `egg_plate` | **Enabled.** Toast on a white plate with one fried egg and bacon, warm sidelight, faint steam, melting butter, haiku burned into the crumb (`seventeen` spelled correctly). Used for Morning toast Imagine stills. A second still (upright slice over two eggs) was held back — lettering read “sewenteen”. Add it when Ann sends a clean replacement. |
+| `egg_plate.jpg` | `egg_plate` | **Enabled.** Toast on a white plate with one fried egg and bacon, warm sidelight, faint steam, melting butter, haiku burned into the crumb (`seventeen` spelled correctly). Used for Morning toast Imagine stills. |
+| `egg_plate-2.jpg` | `egg_plate` | **Enabled.** Second keeper: upright slice over two eggs and bacon. Ann’s clean replacement — `seventeen` spelled correctly. Not a separate catalog style. The old misspelled “sewenteen” still is discarded. |
 
 ## Future (not in the enabled pool)
 
