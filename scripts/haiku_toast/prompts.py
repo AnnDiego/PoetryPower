@@ -60,7 +60,7 @@ IMAGINE_ASPECT_RATIO = "4:3"
 
 # Documented only — not in the enabled catalog.
 FUTURE_STYLES_NOTE = (
-    "Plate-with-coffee, avocado, and egg are future looks, not in the "
+    "Plate-with-coffee and avocado are future looks, not in the "
     "enabled pool. See scripts/haiku_toast/examples/."
 )
 
