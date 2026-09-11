@@ -108,7 +108,10 @@ def writer_user_prompt(
         lines.append(f"- Do not reuse yesterday's tell: {yesterday_tell}")
     if recent_nouns:
         lines.append(
-            f"- Do not repeat recent mornings' signature nouns: {recent_nouns}"
+            f"- Do not repeat recent mornings' signature nouns: {recent_nouns}. "
+            "Sticky picnic/body tells (brie, cheese wedge, checkered cloth, "
+            "toes, clover) stay banned across this window; generic coffee "
+            "or light may stay."
         )
     lines += [
         "",
