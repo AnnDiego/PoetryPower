@@ -204,7 +204,8 @@ def write_haiku(
                 + "; ".join(problems)
                 + ". Write three new lines that include the one required tell, "
                 "drop the avoided lexicon, and do not double-dip the "
-                "soft-nature body cluster or repeat recent signature nouns."
+                "soft-nature body cluster or repeat recent signature nouns "
+                "(including sticky picnic nouns like brie or checkered cloth)."
             )
             try:
                 second = _chat_complete(api_key=key, user_text=retry_text)

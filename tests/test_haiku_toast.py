@@ -57,10 +57,13 @@ from scripts.haiku_toast.drawers import (
     drawer_voice_problems,
     extract_key_words,
     load_last_drawer,
+    memories_from_toast_artifacts,
     prior_mornings,
     recent_noun_reuse,
     recent_signature_nouns,
+    recent_toast_history,
     save_last_drawer,
+    sticky_hits,
     select_drawer,
     soft_nature_doubledip,
     soft_nature_hits,
@@ -166,6 +169,7 @@ class LockedVoiceTests(unittest.TestCase):
         self.assertIn("Do NOT regenerate for syllable counts", VOICE_BRIEF)
         self.assertIn("Do not double-dip the soft-nature body lexicon", VOICE_BRIEF)
         self.assertIn("recent mornings' signature nouns", VOICE_BRIEF)
+        self.assertIn("brie, cheese wedge, checkered cloth", VOICE_BRIEF)
         self.assertIn("one required drawer tell", VOICE_BRIEF)
         self.assertNotIn("sassy-tender", VOICE_BRIEF)
         self.assertNotIn("Hallmark zen", VOICE_BRIEF)
@@ -207,6 +211,7 @@ class LockedVoiceTests(unittest.TestCase):
             nature_only=True,
         )
         self.assertIn("Do not repeat recent mornings' signature nouns: clover, mist, toes", text)
+        self.assertIn("Sticky picnic/body tells", text)
         self.assertIn("one required tell", text)
         self.assertIn("nature-forward", text)
         self.assertNotIn("Prefer one weather/nature tell + one other voltage", text)
@@ -796,6 +801,251 @@ class AntiRepetitionTests(unittest.TestCase):
             self.assertEqual(state["drawer"], DRAWER_CLEAR_HOT)
             self.assertTrue(state["history"])
             self.assertEqual(state["history"][0]["tell"], "clover")
+
+    SEP10_BRIE = (
+        "checkered cloth at dawn\n"
+        "gold brie for two\n"
+        "wet lawn keeps the ants"
+    )
+    SEP11_BRIE_REPEAT = (
+        "coffee steam lifts\n"
+        "a gold brie wedge waiting\n"
+        "first ray on the mug"
+    )
+    SEP11_OK = (
+        "coffee steam lifts\n"
+        "pillow fails as a dawn-shield\n"
+        "I keep the extra mug"
+    )
+
+    def _write_toast(
+        self,
+        out: Path,
+        stamp: str,
+        haiku: str,
+        *,
+        tell: str,
+        drawer: str,
+    ) -> None:
+        (out / f"{stamp}_haiku.txt").write_text(haiku + "\n", encoding="utf-8")
+        (out / f"{stamp}_toast.md").write_text(
+            "\n".join(
+                [
+                    f"# Daily Haiku Toast — {stamp}",
+                    "",
+                    "## Weather drawer",
+                    "",
+                    f"- **Drawer:** {drawer}",
+                    f"- **Tell:** {tell}",
+                    "",
+                    "## Haiku",
+                    "",
+                    haiku,
+                    "",
+                    "## Date & weather",
+                    "",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def test_sticky_hits_catch_gold_brie_and_wedge(self) -> None:
+        hits = sticky_hits(self.SEP10_BRIE)
+        self.assertIn("brie", hits)
+        self.assertIn("gold brie", hits)
+        self.assertIn("checkered", hits)
+        self.assertIn("checkered cloth", hits)
+        self.assertNotIn("coffee", hits)
+        self.assertNotIn("gold", hits)
+        wedge = sticky_hits(self.SEP11_BRIE_REPEAT)
+        self.assertIn("wedge", wedge)
+        self.assertIn("brie wedge", wedge)
+
+    def test_gold_brie_blocked_from_toast_artifacts_without_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self._write_toast(
+                out,
+                "20260910-0740",
+                self.SEP10_BRIE,
+                tell="checkered cloth",
+                drawer="CLEAR MILD",
+            )
+            self.assertFalse((out / ".last_drawer.json").exists())
+            recent = recent_toast_history(out, "2026-09-11")
+            self.assertEqual([m.date for m in recent], ["2026-09-10"])
+            self.assertEqual(recent[0].tell, "checkered cloth")
+            self.assertEqual(recent[0].drawer, DRAWER_CLEAR_MILD)
+            nouns = recent_signature_nouns(recent)
+            self.assertIn("brie", nouns)
+            self.assertIn("gold brie", nouns)
+            self.assertIn("checkered", nouns)
+            self.assertNotIn("coffee", nouns)
+            self.assertNotIn("gold", nouns)
+            self.assertNotIn("light", nouns)
+            self.assertTrue(tell_collides_with_recent("brie", recent))
+            self.assertTrue(tell_collides_with_recent("checkered cloth", recent))
+            self.assertFalse(tell_collides_with_recent("coffee steam", recent))
+            reused = recent_noun_reuse(
+                self.SEP11_BRIE_REPEAT, "coffee steam", nouns
+            )
+            self.assertIn("brie", reused)
+            problems = drawer_voice_problems(
+                self.SEP11_BRIE_REPEAT,
+                DRAWERS[DRAWER_CLEAR_MILD],
+                "coffee steam",
+                recent_nouns=nouns,
+            )
+            self.assertTrue(any("brie" in p for p in problems))
+            self.assertEqual(
+                drawer_voice_problems(
+                    self.SEP11_OK,
+                    DRAWERS[DRAWER_CLEAR_MILD],
+                    "coffee steam",
+                    recent_nouns=nouns,
+                ),
+                [],
+            )
+
+    def test_coffee_and_light_stay_allowed_after_picnic_morning(self) -> None:
+        recent = [
+            LastDrawer(
+                date="2026-09-10",
+                drawer=DRAWER_CLEAR_MILD,
+                tell="checkered cloth",
+                key_words=extract_key_words("checkered cloth", self.SEP10_BRIE),
+            )
+        ]
+        nouns = recent_signature_nouns(recent)
+        self.assertNotIn("coffee", nouns)
+        scrap = "coffee steam lifts\nfirst light on the mug\nI keep the extra cup"
+        self.assertEqual(
+            recent_noun_reuse(scrap, "coffee steam", nouns),
+            [],
+        )
+        self.assertFalse(tell_collides_with_recent("coffee steam", recent))
+        self.assertFalse(tell_collides_with_recent("first ray", recent))
+
+    def test_artifact_lookback_is_three_days_not_older(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self._write_toast(
+                out,
+                "20260907-0800",
+                "clover drinks the dew\npillow fails as a dawn-shield\nI keep the extra mug",
+                tell="clover",
+                drawer="FOG / MARINE LAYER",
+            )
+            self._write_toast(
+                out,
+                "20260909-0715",
+                "photons on my forehead\nthe day coaxes a shirt loose\ngold wins",
+                tell="photons on forehead",
+                drawer="CLEAR HOT",
+            )
+            self._write_toast(
+                out,
+                "20260910-0740",
+                self.SEP10_BRIE,
+                tell="checkered cloth",
+                drawer="CLEAR MILD",
+            )
+            rows = memories_from_toast_artifacts(out, "2026-09-11")
+            dates = [m.date for m in rows]
+            self.assertEqual(dates, ["2026-09-10", "2026-09-09"])
+            self.assertNotIn("2026-09-07", dates)
+            self.assertIn("brie", recent_signature_nouns(rows))
+            self.assertIn("photons", recent_signature_nouns(rows))
+            self.assertNotIn("clover", recent_signature_nouns(rows))
+
+    def test_recent_toast_history_merges_json_and_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            save_last_drawer(
+                out,
+                date="2026-09-10",
+                drawer=DRAWER_CLEAR_MILD,
+                tell="checkered cloth",
+                haiku="checkered cloth at dawn\nwet lawn keeps the ants\npillow fails",
+            )
+            self._write_toast(
+                out,
+                "20260910-0740",
+                self.SEP10_BRIE,
+                tell="checkered cloth",
+                drawer="CLEAR MILD",
+            )
+            recent = recent_toast_history(out, "2026-09-11")
+            self.assertEqual(len(recent), 1)
+            nouns = recent_signature_nouns(recent)
+            self.assertIn("brie", nouns)
+            self.assertIn("checkered", nouns)
+
+    def test_writer_retries_gold_brie_repeat(self) -> None:
+        from scripts.haiku_toast import writer as writer_mod
+
+        replies = [self.SEP11_BRIE_REPEAT, self.SEP11_OK]
+
+        def _fake_chat(**_kwargs: object) -> str:
+            return replies.pop(0)
+
+        with patch.object(writer_mod, "_chat_complete", side_effect=_fake_chat):
+            with patch.object(writer_mod, "resolve_api_key", return_value="test-key"):
+                result = writer_mod.write_haiku(
+                    date_line="Friday, September 11, 2026",
+                    weekday_vibe="slow start",
+                    weather_seed="clear mild",
+                    mode_name="clear_mild",
+                    chosen_tell="coffee steam",
+                    recent_nouns="brie, gold brie, checkered cloth",
+                    drawer_spec=DRAWERS[DRAWER_CLEAR_MILD],
+                    api_key="test-key",
+                )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.haiku, self.SEP11_OK)
+        self.assertEqual(len(result.raw_replies), 2)
+
+    def test_dry_run_avoids_brie_from_toast_artifacts(self) -> None:
+        data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        seed = parse_open_meteo(
+            data, when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            self._write_toast(
+                out,
+                "20260910-0740",
+                self.SEP10_BRIE,
+                tell="checkered cloth",
+                drawer="CLEAR MILD",
+            )
+            with patch(
+                "scripts.haiku_toast.runner.fetch_san_diego_weather",
+                return_value=seed,
+            ):
+                rc = run(
+                    [
+                        "--dry-run",
+                        "--date",
+                        "2026-09-11",
+                        "--style",
+                        "buttered",
+                        "--out-dir",
+                        str(out),
+                    ]
+                )
+            self.assertEqual(rc, 0)
+            report = next(
+                p for p in out.glob("*_toast.md") if "20260910" not in p.name
+            ).read_text(encoding="utf-8")
+            avoided_line = next(
+                ln
+                for ln in report.splitlines()
+                if ln.startswith("- **Avoided recent motifs:**")
+            )
+            self.assertIn("brie", avoided_line)
+            self.assertNotIn("coffee", avoided_line)
 
 
 class WeatherParseTests(unittest.TestCase):
