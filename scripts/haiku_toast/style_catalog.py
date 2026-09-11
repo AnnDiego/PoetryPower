@@ -32,6 +32,14 @@ Photorealistic close-up of a single slice of freshly toasted artisan bread risin
 Letters look like selective Maillard browning, not printed ink. Small morning breakfast items such as a glass of orange juice or cup of tea are visible in the background of the scene. Shallow depth of field, food-photography realism, no extra captions, no watermark.
 """
 
+EGG_PLATE_TEMPLATE = """\
+Photorealistic close-up of a single slice of freshly toasted artisan bread atop a plate of fried eggs and bacon, warm morning sidelight, faint steam. A three-line haiku is burned into the golden crust in darker toasted-brown letters, clearly readable, following the crumb texture:
+
+{HAIKU}
+
+Letters look like selective Maillard browning, not printed ink. A small pat of melting butter appears at one corner of the toast itself. Shallow depth of field, food-photography realism, no extra captions, no watermark.
+"""
+
 
 @dataclass(frozen=True)
 class ToastStyle:
@@ -53,7 +61,7 @@ class ToastStyle:
         return self.imagine_template.replace("{HAIKU}", haiku.strip())
 
 
-# Enabled pool for v2. Plate / avocado / egg stay documented as future
+# Enabled pool. Plate-with-coffee and avocado stay documented as future
 # and are not catalogued here so they cannot be picked.
 _STYLES: Sequence[ToastStyle] = (
     ToastStyle(
@@ -71,6 +79,14 @@ _STYLES: Sequence[ToastStyle] = (
         enabled=True,
         notes="Slice rising from a stainless toaster; juice or tea in the blur.",
         example="toaster_popup.jpg",
+    ),
+    ToastStyle(
+        name="egg_plate",
+        display_name="Egg plate",
+        imagine_template=EGG_PLATE_TEMPLATE,
+        enabled=True,
+        notes="Toast on a plate of fried eggs and bacon; melting butter on the toast.",
+        example="egg_plate.jpg",
     ),
 )
 
