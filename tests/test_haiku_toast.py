@@ -1716,21 +1716,19 @@ class KeeperStillsTests(unittest.TestCase):
         buttered = EXAMPLES / "buttered.jpg"
         toaster = EXAMPLES / "toaster_popup.jpg"
         egg_plate = EXAMPLES / "egg_plate.jpg"
+        egg_plate_2 = EXAMPLES / "egg_plate-2.jpg"
         plate = EXAMPLES / "toast-plate.jpg"
         board = EXAMPLES / "toast-board.jpg"
-        for path in (buttered, toaster, egg_plate, plate, board):
+        for path in (buttered, toaster, egg_plate, egg_plate_2, plate, board):
             self.assertTrue(path.is_file(), f"missing {path}")
             self.assertGreater(path.stat().st_size, 1000)
-        self.assertFalse(
-            (EXAMPLES / "egg_plate-2.jpg").is_file(),
-            "do not keep the misspelled upright still as a style example",
-        )
         note = (EXAMPLES / "README.md").read_text(encoding="utf-8")
         self.assertIn("buttered", note)
         self.assertIn("toaster_popup", note)
         self.assertIn("egg_plate", note)
-        self.assertNotIn("egg_plate-2.jpg", note)
+        self.assertIn("egg_plate-2.jpg", note)
         self.assertIn("seventeen", note)
+        self.assertNotIn("held back", note)
         self.assertIn("not in the enabled pool", note)
         self.assertIn("avocado", note)
         self.assertNotIn("egg (future)", note)
