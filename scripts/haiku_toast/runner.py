@@ -66,7 +66,7 @@ from .drawers import (
     DRAWERS,
     NATURE_ONLY_DRAWERS,
     load_last_drawer,
-    prior_mornings,
+    recent_toast_history,
     save_last_drawer,
     yesterday_note,
 )
@@ -616,8 +616,14 @@ def run(argv: Optional[List[str]] = None) -> int:
 
     today = when.date().isoformat()
     prior_state = load_last_drawer(out_dir)
+    recent = recent_toast_history(out_dir, today, previous=prior_state)
     y_drawer, y_tell = yesterday_note(prior_state, today)
-    recent = prior_mornings(prior_state, today)
+    if y_tell is None and recent:
+        y_drawer, y_tell = recent[0].drawer, recent[0].tell
+        if not y_tell or y_tell.lower() in {"n/a", "(from toast)"}:
+            y_drawer, y_tell = None, None
+        elif y_drawer == "UNKNOWN":
+            y_drawer = None
     try:
         voice = choose_mode(
             weather,
