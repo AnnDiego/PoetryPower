@@ -7,6 +7,7 @@ Run from repo root:
     python -m scripts.haiku_toast --dry-run
     python -m scripts.haiku_toast --style buttered
     python -m scripts.haiku_toast --style toaster_popup
+    python -m scripts.haiku_toast --style egg_plate
     python -m scripts.haiku_toast --seed 17
     python -m scripts.haiku_toast --mode verdant
     python -m scripts.haiku_toast --imagine-n 4
@@ -161,7 +162,7 @@ def _parse_args(argv: Optional[List[str]]) -> argparse.Namespace:
         "--style",
         metavar="NAME",
         help=(
-            "Force a catalog style (buttered, toaster_popup). "
+            "Force a catalog style (buttered, toaster_popup, egg_plate). "
             "Default: random among enabled styles."
         ),
     )
