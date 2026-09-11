@@ -12,7 +12,7 @@ import math
 import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -45,6 +45,8 @@ CLEAR_HOT_TEMP_F = 75
 
 STATE_FILENAME = ".last_drawer.json"
 RECENT_HISTORY_N = 5
+# Last N calendar days of toasts/*_haiku.txt (+ sibling reports).
+TOAST_ARTIFACT_LOOKBACK_DAYS = 3
 
 _STOP = frozenset(
     {
@@ -90,6 +92,7 @@ SOFT_NATURE_BODY = frozenset(
 _SOFT_NATURE_CANON = {"toe": "toes", "tendril": "tendrils"}
 
 # Too common to treat as a "signature noun" across mornings.
+# Coffee / steam / mug / light may stay in voice after a picnic morning.
 _GENERIC_SIGNATURE = frozenset(
     {
         "sun",
@@ -113,7 +116,47 @@ _GENERIC_SIGNATURE = frozenset(
         "considering",
         "breaking",
         "clothes",
+        "coffee",
+        "steam",
+        "mug",
+        "cup",
     }
+)
+
+# Distinctive drawer nouns banned across the recent-toast window.
+# Not the whole picnic tag (that would also ban coffee).
+STICKY_NOUNS = frozenset(
+    {
+        "brie",
+        "cheese",
+        "wedge",
+        "checkered",
+        "clover",
+        "toes",
+        "toe",
+        "peat",
+        "taco",
+        "tacos",
+        "gingham",
+        "camembert",
+        "cheddar",
+    }
+)
+_STICKY_CANON = {
+    "toe": "toes",
+    "taco": "tacos",
+}
+
+# Multi-word picnic / body tells that stacked on 2026-09-10 / 09-11.
+STICKY_PHRASES = (
+    "gold brie",
+    "brie wedge",
+    "cheese wedge",
+    "checkered cloth",
+    "pillow-shield",
+    "pillow shield",
+    "palm-frond",
+    "palm frond",
 )
 
 # Drawers that may stay nature-forward. Still no earth-body pile-on.
@@ -127,7 +170,9 @@ NATURE_ONLY_DRAWERS = frozenset(
     }
 )
 
-# Motif tags for rolling skip. Only soft_earth is "samey" across days.
+# Motif tags recorded on each morning. soft_earth is samey across days.
+# Picnic cheese/cloth are blocked via sticky nouns, not this whole picnic tag
+# (that tag still includes coffee).
 MOTIF_TAG_WORDS = {
     "soft_earth": frozenset(
         {
@@ -145,6 +190,8 @@ MOTIF_TAG_WORDS = {
     ),
     "body_path": frozenset({"toes", "toe", "hips", "forehead", "nape", "cheek"}),
     "picnic": frozenset({"brie", "coffee", "checkered", "cloth", "taco", "pillow"}),
+    "picnic_cheese": frozenset({"brie", "cheese", "wedge", "camembert", "cheddar"}),
+    "picnic_cloth": frozenset({"checkered", "gingham"}),
     "gold_light": frozenset({"buttery", "gold", "photons", "pearl", "luminous"}),
     "celestial": frozenset({"moon", "venus", "stars", "crescent", "saucer"}),
     "rain_song": frozenset({"rain", "drum", "chime", "chimes", "roof"}),
@@ -483,6 +530,206 @@ def prior_mornings(
         seen.add(mem.date)
         out.append(mem)
     return out[:n]
+
+
+_STAMP_NAME = re.compile(r"^(\d{8})-\d{4}_(haiku\.txt|toast\.md)$")
+_REPORT_TELL = re.compile(r"^- \*\*Tell:\*\* (.+)$", re.M)
+_REPORT_DRAWER = re.compile(r"^- \*\*Drawer:\*\* (.+)$", re.M)
+_REPORT_HAIKU = re.compile(
+    r"^## Haiku\s*\n+(.+?)(?:\n## |\n---|\Z)", re.M | re.S
+)
+
+
+def _iso_from_yyyymmdd(value: str) -> str:
+    return f"{value[:4]}-{value[4:6]}-{value[6:8]}"
+
+
+def _iso_minus_days(today: str, days: int) -> str:
+    try:
+        d = datetime.strptime(today, "%Y-%m-%d").date()
+    except ValueError:
+        return today
+    return (d - timedelta(days=days)).isoformat()
+
+
+def _normalize_drawer_label(label: str) -> str:
+    raw = (label or "").strip()
+    if not raw or raw.lower() == "n/a":
+        return "UNKNOWN"
+    if raw in DRAWERS:
+        return raw
+    compact = re.sub(r"[^a-z0-9]+", "_", raw.lower()).strip("_")
+    if compact in DRAWERS:
+        return compact
+    for name, spec in DRAWERS.items():
+        if compact == name.lower():
+            return name
+        spec_compact = re.sub(
+            r"[^a-z0-9]+", "_", spec.display_name.lower()
+        ).strip("_")
+        if compact == spec_compact or spec_compact.startswith(compact + "_"):
+            return name
+    return "UNKNOWN"
+
+
+def sticky_hits(text: str) -> List[str]:
+    """Sticky picnic/body phrases and nouns found in *text*."""
+    blob = re.sub(r"[-–—]", " ", (text or "").lower())
+    blob = re.sub(r"\s+", " ", blob)
+    hits: List[str] = []
+    seen = set()
+    for phrase in STICKY_PHRASES:
+        needle = phrase.replace("-", " ")
+        if needle in blob and phrase not in seen:
+            seen.add(phrase)
+            hits.append(phrase)
+    for word in re.findall(r"[a-zA-Z']+", (text or "").lower()):
+        word = word.replace("'", "")
+        canon = _STICKY_CANON.get(word, word)
+        if canon in STICKY_NOUNS and canon not in seen:
+            seen.add(canon)
+            hits.append(canon)
+    return hits
+
+
+def _memory_from_artifact(
+    *,
+    date: str,
+    haiku: str,
+    tell: str,
+    drawer: str,
+) -> LastDrawer:
+    used_tell = tell if tell and tell.lower() != "n/a" else ""
+    if not used_tell:
+        hits = sticky_hits(haiku)
+        used_tell = hits[0] if hits else "(from toast)"
+    used_drawer = drawer if drawer and drawer != "UNKNOWN" else "UNKNOWN"
+    blob = f"{used_tell}\n{haiku}"
+    return LastDrawer(
+        date=date,
+        drawer=used_drawer,
+        tell=used_tell,
+        motifs=motif_tags_for_text(blob),
+        key_words=extract_key_words(used_tell, haiku),
+    )
+
+
+def memories_from_toast_artifacts(
+    out_dir: Path,
+    today: str,
+    *,
+    days: int = TOAST_ARTIFACT_LOOKBACK_DAYS,
+) -> List[LastDrawer]:
+    """Rebuild prior mornings from toasts/*_haiku.txt and *_toast.md."""
+    root = Path(out_dir)
+    if not root.is_dir():
+        return []
+    cutoff = _iso_minus_days(today, days)
+    by_date: Dict[str, List[Tuple[str, str, str]]] = {}
+    for path in root.iterdir():
+        match = _STAMP_NAME.match(path.name)
+        if not match:
+            continue
+        date = _iso_from_yyyymmdd(match.group(1))
+        if date >= today or date < cutoff:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if path.name.endswith("_haiku.txt"):
+            haiku = text.strip()
+            report = ""
+        else:
+            haiku_match = _REPORT_HAIKU.search(text)
+            haiku = haiku_match.group(1).strip() if haiku_match else ""
+            report = text
+        by_date.setdefault(date, []).append((path.name, haiku, report))
+
+    rows: List[LastDrawer] = []
+    for date in sorted(by_date, reverse=True):
+        haikus: List[str] = []
+        tells: List[str] = []
+        drawers: List[str] = []
+        for _name, haiku, report in sorted(by_date[date]):
+            if haiku:
+                haikus.append(haiku)
+            if not report:
+                continue
+            tell_m = _REPORT_TELL.search(report)
+            drawer_m = _REPORT_DRAWER.search(report)
+            if tell_m:
+                tells.append(tell_m.group(1).strip())
+            if drawer_m:
+                drawers.append(_normalize_drawer_label(drawer_m.group(1).strip()))
+        if not haikus and not tells:
+            continue
+        tell = next((t for t in tells if t and t.lower() != "n/a"), "")
+        drawer = next((d for d in drawers if d != "UNKNOWN"), "UNKNOWN")
+        rows.append(
+            _memory_from_artifact(
+                date=date,
+                haiku="\n".join(haikus),
+                tell=tell,
+                drawer=drawer,
+            )
+        )
+    return rows
+
+
+def _prefer_real_tell(left: str, right: str) -> str:
+    placeholders = {"", "(from toast)", "n/a"}
+    if left and left.lower() not in placeholders:
+        return left
+    if right and right.lower() not in placeholders:
+        return right
+    return left or right
+
+
+def merge_morning_memories(*groups: Sequence[LastDrawer]) -> List[LastDrawer]:
+    """Union key words / motifs by date. Newest first."""
+    by_date: Dict[str, LastDrawer] = {}
+    for group in groups:
+        for mem in group:
+            existing = by_date.get(mem.date)
+            if existing is None:
+                by_date[mem.date] = mem
+                continue
+            words: List[str] = []
+            seen = set()
+            for word in (*existing.key_words, *mem.key_words):
+                if word in seen:
+                    continue
+                seen.add(word)
+                words.append(word)
+            motifs = tuple(dict.fromkeys((*existing.motifs, *mem.motifs)))
+            drawer = existing.drawer
+            if drawer in {"", "UNKNOWN"} and mem.drawer not in {"", "UNKNOWN"}:
+                drawer = mem.drawer
+            by_date[mem.date] = LastDrawer(
+                date=mem.date,
+                drawer=drawer,
+                tell=_prefer_real_tell(existing.tell, mem.tell),
+                motifs=motifs,
+                key_words=tuple(words),
+            )
+    return sorted(by_date.values(), key=lambda m: m.date, reverse=True)[
+        :RECENT_HISTORY_N
+    ]
+
+
+def recent_toast_history(
+    out_dir: Path,
+    today: str,
+    previous: Optional[LastDrawer] = None,
+) -> List[LastDrawer]:
+    """JSON rolling memory plus last few days of toasts/ artifacts."""
+    if previous is None:
+        previous = load_last_drawer(out_dir)
+    return merge_morning_memories(
+        prior_mornings(previous, today),
+        memories_from_toast_artifacts(out_dir, today),
+    )
 
 
 def recent_signature_nouns(recent: Sequence[LastDrawer]) -> List[str]:
@@ -845,6 +1092,7 @@ def _all_tell_words() -> frozenset:
         for tell in spec.tells:
             words.update(tell_tokens(tell))
     words.update(SOFT_NATURE_BODY)
+    words.update(STICKY_NOUNS)
     return frozenset(words)
 
 
@@ -896,17 +1144,41 @@ def motif_tags_for_text(text: str) -> Tuple[str, ...]:
 
 
 def extract_key_words(tell: str, haiku: str = "") -> Tuple[str, ...]:
-    """Signature nouns: distinctive tell tokens + soft-nature hits."""
+    """Signature nouns: sticky picnic/body hits + tell tokens + soft-nature."""
     allowed = all_tell_words()
+    blob = f"{tell}\n{haiku}"
     out: List[str] = []
     seen = set()
-    for word in (*tell_tokens(tell), *tell_tokens(haiku), *soft_nature_hits(haiku)):
+    for word in (
+        *sticky_hits(blob),
+        *tell_tokens(tell),
+        *tell_tokens(haiku),
+        *soft_nature_hits(haiku),
+    ):
         if word in seen or word in _GENERIC_SIGNATURE:
             continue
-        if word in SOFT_NATURE_BODY or word in allowed:
+        if (
+            word in SOFT_NATURE_BODY
+            or word in STICKY_NOUNS
+            or word in STICKY_PHRASES
+            or word in allowed
+        ):
             seen.add(word)
             out.append(word)
     return tuple(out)
+
+
+def _sticky_set(text: str, extra: Sequence[str] = ()) -> set:
+    hits = set(sticky_hits(text))
+    for word in extra:
+        low = word.lower()
+        if low in STICKY_NOUNS or low in STICKY_PHRASES:
+            hits.add(low)
+        for part in re.findall(r"[a-z]+", low):
+            canon = _STICKY_CANON.get(part, part)
+            if canon in STICKY_NOUNS:
+                hits.add(canon)
+    return hits
 
 
 def tell_collides_with_recent(
@@ -919,7 +1191,9 @@ def tell_collides_with_recent(
     tell_l = tell.lower()
     tokens = {w for w in tell_tokens(tell) if w not in _GENERIC_SIGNATURE}
     tell_soft = set(soft_nature_hits(tell))
+    tell_sticky = _sticky_set(tell)
     recent_tokens: set = set()
+    recent_sticky: set = set()
     recent_soft = False
     for mem in recent:
         if mem.tell and mem.tell.lower() == tell_l:
@@ -930,15 +1204,29 @@ def tell_collides_with_recent(
         recent_tokens.update(
             w for w in mem.key_words if w not in _GENERIC_SIGNATURE
         )
+        recent_sticky.update(_sticky_set(mem.tell, mem.key_words))
         if SAMEY_MOTIFS & set(mem.motifs) or soft_nature_hits(mem.tell):
             recent_soft = True
         if set(mem.key_words) & SOFT_NATURE_BODY:
             recent_soft = True
     if tokens & recent_tokens:
         return True
+    if tell_sticky & recent_sticky:
+        return True
     if recent_soft and tell_soft:
         return True
     return False
+
+
+def _noun_is_protected(noun: str, protected: set) -> bool:
+    low = noun.lower()
+    if low in protected:
+        return True
+    parts = re.findall(r"[a-z]+", low)
+    return bool(parts) and any(
+        _STICKY_CANON.get(part, part) in protected or part in protected
+        for part in parts
+    )
 
 
 def recent_noun_reuse(
@@ -950,13 +1238,23 @@ def recent_noun_reuse(
     if not recent_nouns:
         return []
     blob = haiku.lower()
-    protected = set(tell_tokens(tell)) | set(soft_nature_hits(tell))
-    allowed = all_tell_words()
+    protected = (
+        set(tell_tokens(tell))
+        | set(soft_nature_hits(tell))
+        | set(sticky_hits(tell))
+    )
+    allowed = all_tell_words() | STICKY_NOUNS | set(STICKY_PHRASES)
     reused: List[str] = []
     for noun in recent_nouns:
-        if noun in protected or noun not in allowed or len(noun) < 4:
+        low = noun.lower()
+        if _noun_is_protected(low, protected):
             continue
-        if re.search(rf"\b{re.escape(noun)}\b", blob):
+        is_phrase = " " in low or "-" in low
+        if low not in allowed and not is_phrase:
+            continue
+        if not is_phrase and low not in STICKY_NOUNS and len(low) < 4:
+            continue
+        if re.search(rf"\b{re.escape(low)}\b", blob):
             reused.append(noun)
     return reused
 
