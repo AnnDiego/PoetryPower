@@ -10,18 +10,19 @@ Reference looks for the local toast style catalog
 | --- | --- | --- |
 | `buttered.jpg` | `buttered` | **Enabled.** Board default evolution: rustic wooden board, warm sidelight, faint steam, melting butter on the toast, haiku burned into the crumb as Maillard browning. |
 | `toaster_popup.jpg` | `toaster_popup` | **Enabled.** Slice rising from a stainless toaster; orange juice or tea in the soft background. Same burned-in three-line haiku. |
+| `egg_plate.jpg` | `egg_plate` | **Enabled.** Primary keeper: toast on a white plate with fried egg and bacon, warm sidelight, faint steam, melting butter, haiku burned into the crumb. Used for Morning toast Imagine stills. |
+| `egg_plate-2.jpg` | `egg_plate` | **Enabled.** Second keeper still for the same `egg_plate` look (upright slice, two eggs). Not a separate catalog style. |
 
 ## Future (not in the enabled pool)
 
 | File | Style | Role |
 | --- | --- | --- |
 | `toast-plate.jpg` | plate (future) | Plate + coffee cup. Documented only — not catalogued, not randomly picked. |
-| `toast-board.jpg` | — | Original v1 board still. Same family as `buttered`; kept as history. Not a third enabled style. |
+| `toast-board.jpg` | — | Original v1 board still. Same family as `buttered`; kept as history. Not a fourth enabled style. |
 | *(none yet)* | avocado (future) | Out of the pool until Ann adds a prompt + keeper. Imagine-fail fallback is the Canva Oopsie still at `scripts/haiku_toast/assets/avocado-toast-4x3.png` (OOPS! / Fresh Toast Tomorrow — not a catalog style, no haiku burn-in). |
-| *(none yet)* | egg (future) | Out of the pool until Ann adds a prompt + keeper. |
 
-Each enabled style's Imagine template replaces `{HAIKU}` only. Both
-templates require exactly three lines and letters that follow the crumb
+Each enabled style's Imagine template replaces `{HAIKU}` only. Enabled
+templates require a three-line haiku and letters that follow the crumb
 as selective Maillard browning, not printed ink.
 
 Keeper sample haiku burned into the stills:

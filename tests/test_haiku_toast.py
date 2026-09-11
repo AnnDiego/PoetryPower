@@ -27,6 +27,7 @@ from scripts.haiku_toast.runner import (
 )
 from scripts.haiku_toast.style_catalog import (
     BUTTERED_TEMPLATE,
+    EGG_PLATE_TEMPLATE,
     TOASTER_POPUP_TEMPLATE,
     ToastStyle,
     choose_style,
@@ -84,11 +85,11 @@ from scripts.haiku_toast.weather import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = REPO_ROOT / "scripts" / "haiku_toast" / "examples"
-ENABLED = {"buttered", "toaster_popup"}
+ENABLED = {"buttered", "egg_plate", "toaster_popup"}
 
 
 class StyleCatalogTests(unittest.TestCase):
-    def test_loads_enabled_buttered_and_toaster_popup_only(self) -> None:
+    def test_loads_enabled_buttered_toaster_popup_and_egg_plate(self) -> None:
         catalog = load_catalog()
         names = {s.name for s in catalog}
         self.assertEqual(names, ENABLED)
@@ -101,6 +102,9 @@ class StyleCatalogTests(unittest.TestCase):
         self.assertEqual(get_style("toaster_popup").name, "toaster_popup")
         self.assertEqual(get_style("toaster-popup").name, "toaster_popup")
         self.assertEqual(get_style("Buttered (board)").name, "buttered")
+        self.assertEqual(get_style("egg_plate").name, "egg_plate")
+        self.assertEqual(get_style("egg-plate").name, "egg_plate")
+        self.assertEqual(get_style("Egg plate").name, "egg_plate")
         self.assertIsNone(get_style("plate"))
         self.assertIsNone(get_style("avocado"))
         self.assertIsNone(get_style("egg"))
@@ -108,10 +112,12 @@ class StyleCatalogTests(unittest.TestCase):
     def test_choose_style_override_and_unknown(self) -> None:
         self.assertEqual(choose_style(name="buttered").name, "buttered")
         self.assertEqual(choose_style(name="toaster_popup").name, "toaster_popup")
+        self.assertEqual(choose_style(name="egg_plate").name, "egg_plate")
         with self.assertRaises(ValueError) as ctx:
             choose_style(name="avocado")
         self.assertIn("Unknown toast style", str(ctx.exception))
         self.assertIn("buttered", str(ctx.exception))
+        self.assertIn("egg_plate", str(ctx.exception))
 
     def test_random_pick_stays_in_enabled_set(self) -> None:
         extra = list(load_catalog()) + [
@@ -132,7 +138,10 @@ class StyleCatalogTests(unittest.TestCase):
         for style in load_catalog():
             tmpl = style.imagine_template
             self.assertEqual(tmpl.count("{HAIKU}"), 1)
-            self.assertIn("exactly three lines", tmpl)
+            self.assertTrue(
+                "exactly three lines" in tmpl or "three-line haiku" in tmpl,
+                f"{style.name} must require a three-line haiku",
+            )
             self.assertIn("crumb", tmpl.lower())
             self.assertIn("Maillard browning", tmpl)
             self.assertIn("not printed ink", tmpl)
@@ -155,6 +164,15 @@ class StyleCatalogTests(unittest.TestCase):
         self.assertEqual(
             toaster.replace("one\ntwo\nthree", "{HAIKU}"),
             TOASTER_POPUP_TEMPLATE,
+        )
+        egg = fill_imagine_prompt("one\ntwo\nthree", get_style("egg_plate"))
+        self.assertIn("fried eggs and bacon", egg)
+        self.assertIn("melting butter", egg)
+        self.assertNotIn("stainless steel toaster", egg)
+        self.assertNotIn("rustic wooden board", egg)
+        self.assertEqual(
+            egg.replace("one\ntwo\nthree", "{HAIKU}"),
+            EGG_PLATE_TEMPLATE,
         )
 
 
@@ -1188,6 +1206,19 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("orange juice", report)
         self.assertNotIn("melting butter", report.split("```", 2)[1])
 
+    def test_dry_run_egg_plate_override(self) -> None:
+        _, report = self._dry(["--style", "egg_plate"])
+        self.assertIn("style `egg_plate`", report)
+        self.assertIn("**Chosen:** `egg_plate`", report)
+        self.assertIn("`--style egg_plate`", report)
+        self.assertIn("fried eggs and bacon", report)
+        self.assertIn("melting butter", report)
+        prompt_block = report.split("```", 2)[1]
+        self.assertIn("fried eggs and bacon", prompt_block)
+        self.assertIn("Crisp slice, quiet dawn", prompt_block)
+        self.assertNotIn("stainless steel toaster", prompt_block)
+        self.assertNotIn("rustic wooden board", prompt_block)
+
     def test_dry_run_seed_is_reproducible(self) -> None:
         _, report_a = self._dry(["--seed", "7"])
         _, report_b = self._dry(["--seed", "7"])
@@ -1195,7 +1226,7 @@ class DateAndDryRunTests(unittest.TestCase):
         chosen_b = [ln for ln in report_b.splitlines() if ln.startswith("- **Chosen:**")]
         self.assertEqual(chosen_a, chosen_b)
         self.assertEqual(len(chosen_a), 2)
-        self.assertRegex(chosen_a[0], r"`(buttered|toaster_popup)`")
+        self.assertRegex(chosen_a[0], r"`(buttered|toaster_popup|egg_plate)`")
         self.assertRegex(
             chosen_a[1],
             r"`(verdant|starlit_dawn|tender|picnic_wink|soft_weather_soul|"
@@ -1684,17 +1715,21 @@ class KeeperStillsTests(unittest.TestCase):
     def test_enabled_and_future_examples_exist(self) -> None:
         buttered = EXAMPLES / "buttered.jpg"
         toaster = EXAMPLES / "toaster_popup.jpg"
+        egg_plate = EXAMPLES / "egg_plate.jpg"
+        egg_plate_2 = EXAMPLES / "egg_plate-2.jpg"
         plate = EXAMPLES / "toast-plate.jpg"
         board = EXAMPLES / "toast-board.jpg"
-        for path in (buttered, toaster, plate, board):
+        for path in (buttered, toaster, egg_plate, egg_plate_2, plate, board):
             self.assertTrue(path.is_file(), f"missing {path}")
             self.assertGreater(path.stat().st_size, 1000)
         note = (EXAMPLES / "README.md").read_text(encoding="utf-8")
         self.assertIn("buttered", note)
         self.assertIn("toaster_popup", note)
+        self.assertIn("egg_plate", note)
+        self.assertIn("egg_plate-2.jpg", note)
         self.assertIn("not in the enabled pool", note)
         self.assertIn("avocado", note)
-        self.assertIn("egg", note)
+        self.assertNotIn("egg (future)", note)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """
 Voice modes for Morning Haiku Toast.
 
-Separate from Imagine style roulette (buttered / toaster_popup).
+Separate from Imagine style roulette (buttered / toaster_popup / egg_plate).
 Maps Ann's weather → drawer tree onto a locked mode + heat 0–1.
 """
 
