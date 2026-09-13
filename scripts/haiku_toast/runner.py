@@ -15,6 +15,7 @@ Run from repo root:
 
 Flow:
   San Diego date + inland-home (92128) morning hourly Open-Meteo
+  (+ downtown coast strip for Morning Toast → X captions only)
   → Ann weather drawer (or --mode)
   → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
@@ -50,8 +51,10 @@ from .legibility import (
     pick_legible_still,
 )
 from .prompts import (
+    DOWNTOWN_LOCATION,
     FUTURE_STYLES_NOTE,
     IMAGINE_ASPECT_RATIO,
+    INLAND_HOME_LOCATION,
     KEEPER_SAMPLE_HAIKU,
     SAN_DIEGO_TZ,
     VOICE_BRIEF,
@@ -73,7 +76,13 @@ from .drawers import (
     yesterday_note,
 )
 from .voice_modes import MODE_NAMES, ModePick, choose_mode
-from .weather import WeatherSeed, fetch_san_diego_weather, weekday_vibe
+from .weather import (
+    DowntownForecast,
+    WeatherSeed,
+    fetch_morning_weather,
+    skipped_morning_weather,
+    weekday_vibe,
+)
 from .writer import WriteResult, resolve_api_key, write_haiku
 from scripts.poem_visualizer.imagine_client import MAX_IMAGE_N
 
@@ -107,6 +116,7 @@ class RunResult:
     dry: bool
     wrote_live: bool
     imagined: bool
+    x_forecast: Optional[DowntownForecast] = None
     style: Optional[ToastStyle] = None
     style_selection: str = "random"
     style_seed: Optional[int] = None
@@ -335,11 +345,29 @@ def render_report(result: RunResult) -> str:
         "## Date & weather",
         "",
         f"- **Date:** {result.date_line} (`{SAN_DIEGO_TZ}`)",
-        f"- **Location:** {WEATHER_LOCATION}",
+        f"- **Location:** {weather.location or WEATHER_LOCATION} — toast / drawer / Notion",
         f"- **Weekday vibe:** {weekday_vibe(result.weekday)}",
         f"- **Hourly:** {weather.hourly_report_line()}",
         f"- **Daily:** {weather.daily_context_line()}",
+        f"- **Notion:** {weather.notion_line()}",
         f"- **Source:** {weather.source} ({weather.source_url}) — hourly at pull hour + daily sunrise. Not a weather product.",
+    ]
+    x_forecast = result.x_forecast
+    if x_forecast is not None:
+        lines += [
+            "",
+            "## X forecast (downtown / coast)",
+            "",
+            "- **Use:** Morning Toast → X caption only. Does not seed the haiku, drawer, Imagine, or Notion weather line.",
+            f"- **Location:** {x_forecast.location} (`{x_forecast.lat}`, `{x_forecast.lon}`)",
+            f"- **Window:** {x_forecast.kind} (`forecast_days={x_forecast.forecast_days}`)",
+            "- **Strip:**",
+            "",
+            "```",
+            x_forecast.compose_block(),
+            "```",
+        ]
+    lines += [
         "",
         "## Syllables (optional heuristic)",
         "",
@@ -610,12 +638,14 @@ def run(argv: Optional[List[str]] = None) -> int:
         print(f"  Style: {style.name}  (random among {', '.join(enabled_names())})")
 
     if args.no_weather:
-        weather = WeatherSeed(ok=False, error="--no-weather")
+        weather, x_forecast = skipped_morning_weather(when=when)
         print("Weather fetch skipped (--no-weather).")
     else:
-        print(f"Fetching {WEATHER_LOCATION} morning hourly from Open-Meteo…")
-        weather = fetch_san_diego_weather(when=when)
-        print(f"  {weather.seed_line()}")
+        print(f"Fetching {INLAND_HOME_LOCATION} morning hourly from Open-Meteo…")
+        print(f"Fetching {DOWNTOWN_LOCATION} daily strip for X forecast only…")
+        weather, x_forecast = fetch_morning_weather(when=when)
+        print(f"  inland: {weather.seed_line()}")
+        print(f"  downtown X: {x_forecast.compose_block().splitlines()[0]}")
 
     today = when.date().isoformat()
     prior_state = load_last_drawer(out_dir)
@@ -817,6 +847,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         date_line=date_line,
         weekday=weekday,
         weather=weather,
+        x_forecast=x_forecast,
         haiku=haiku,
         imagine_prompt=imagine_prompt,
         dry=dry,

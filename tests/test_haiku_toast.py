@@ -12,6 +12,12 @@ from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from scripts.haiku_toast.prompts import (
+    DOWNTOWN_LAT,
+    DOWNTOWN_LOCATION,
+    DOWNTOWN_LON,
+    INLAND_HOME_LAT,
+    INLAND_HOME_LOCATION,
+    INLAND_HOME_LON,
     KEEPER_SAMPLE_HAIKU,
     SAN_DIEGO_LAT,
     SAN_DIEGO_LON,
@@ -82,9 +88,16 @@ from scripts.haiku_toast.voice_modes import (
     mode_for_drawer,
 )
 from scripts.haiku_toast.weather import (
+    DowntownForecast,
     WeatherSeed,
+    fetch_downtown_x_forecast,
+    fetch_inland_home_weather,
+    fetch_morning_weather,
     fetch_san_diego_weather,
+    parse_downtown_daily,
     parse_open_meteo,
+    skipped_morning_weather,
+    x_forecast_window,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -311,6 +324,17 @@ def _snap(**kwargs) -> WeatherSeed:
     )
     base.update(kwargs)
     return WeatherSeed(**base)
+
+
+def _x_stub(when: datetime | None = None) -> DowntownForecast:
+    return skipped_morning_weather(
+        when=when or datetime(2026, 9, 9, 6, 30, tzinfo=TZ),
+        error="test",
+    )[1]
+
+
+def _morning_pair(seed: WeatherSeed, when: datetime | None = None):
+    return (seed, _x_stub(when))
 
 
 class VoiceModeTests(unittest.TestCase):
@@ -792,8 +816,8 @@ class AntiRepetitionTests(unittest.TestCase):
                 data, when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
             )
             with patch(
-                "scripts.haiku_toast.runner.fetch_san_diego_weather",
-                return_value=seed,
+                "scripts.haiku_toast.runner.fetch_morning_weather",
+                return_value=_morning_pair(seed),
             ):
                 rc = run(
                     [
@@ -1043,8 +1067,10 @@ class AntiRepetitionTests(unittest.TestCase):
                 drawer="CLEAR MILD",
             )
             with patch(
-                "scripts.haiku_toast.runner.fetch_san_diego_weather",
-                return_value=seed,
+                "scripts.haiku_toast.runner.fetch_morning_weather",
+                return_value=_morning_pair(
+                    seed, datetime(2026, 9, 11, 6, 30, tzinfo=TZ)
+                ),
             ):
                 rc = run(
                     [
@@ -1129,13 +1155,18 @@ class WeatherParseTests(unittest.TestCase):
             )
         self.assertTrue(seed.ok)
         params = get.call_args.kwargs.get("params") or get.call_args[1]
-        self.assertEqual(params["latitude"], SAN_DIEGO_LAT)
-        self.assertEqual(params["longitude"], SAN_DIEGO_LON)
+        self.assertEqual(params["latitude"], INLAND_HOME_LAT)
+        self.assertEqual(params["longitude"], INLAND_HOME_LON)
         self.assertEqual(params["timezone"], SAN_DIEGO_TZ)
-        self.assertEqual(SAN_DIEGO_LAT, 32.9910)
-        self.assertEqual(SAN_DIEGO_LON, -117.0713)
+        self.assertEqual(INLAND_HOME_LAT, 32.9910)
+        self.assertEqual(INLAND_HOME_LON, -117.0713)
+        self.assertEqual(SAN_DIEGO_LAT, INLAND_HOME_LAT)
+        self.assertEqual(SAN_DIEGO_LON, INLAND_HOME_LON)
         self.assertEqual(SAN_DIEGO_TZ, "America/Los_Angeles")
-        self.assertIn("92128", WEATHER_LOCATION)
+        self.assertIn("92128", INLAND_HOME_LOCATION)
+        self.assertEqual(WEATHER_LOCATION, INLAND_HOME_LOCATION)
+        self.assertEqual(seed.location, INLAND_HOME_LOCATION)
+        self.assertEqual(seed.use, "toast")
         hourly = params["hourly"]
         daily = params["daily"]
         for field in (
@@ -1151,6 +1182,146 @@ class WeatherParseTests(unittest.TestCase):
             self.assertIn(field, hourly)
         self.assertIn("sunrise", daily)
         self.assertNotIn("weather_code", daily.split(","))
+
+    def test_x_forecast_window_weekday_and_weekend(self) -> None:
+        mon = datetime(2026, 9, 7, 6, 30, tzinfo=TZ)
+        wed = datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        fri = datetime(2026, 9, 11, 6, 30, tzinfo=TZ)
+        sun = datetime(2026, 9, 13, 6, 30, tzinfo=TZ)
+        start, days, kind = x_forecast_window(mon)
+        self.assertEqual((start.isoformat(), days, kind), ("2026-09-07", 5, "weekday"))
+        start, days, kind = x_forecast_window(wed)
+        self.assertEqual((start.isoformat(), days, kind), ("2026-09-07", 5, "weekday"))
+        start, days, kind = x_forecast_window(fri)
+        self.assertEqual((start.isoformat(), days, kind), ("2026-09-11", 3, "weekend"))
+        start, days, kind = x_forecast_window(sun)
+        self.assertEqual((start.isoformat(), days, kind), ("2026-09-11", 3, "weekend"))
+
+    def test_parse_downtown_daily_builds_x_strip(self) -> None:
+        data = {
+            "daily": {
+                "time": [
+                    "2026-09-07",
+                    "2026-09-08",
+                    "2026-09-09",
+                    "2026-09-10",
+                    "2026-09-11",
+                ],
+                "temperature_2m_max": [91, 86, 82, 78, 74],
+                "temperature_2m_min": [74, 70, 68, 66, 64],
+                "weather_code": [0, 1, 2, 3, 45],
+            }
+        }
+        forecast = parse_downtown_daily(data, kind="weekday", forecast_days=5)
+        self.assertTrue(forecast.ok)
+        self.assertEqual(forecast.location, DOWNTOWN_LOCATION)
+        self.assertEqual(forecast.use, "x_forecast")
+        self.assertEqual(forecast.lat, DOWNTOWN_LAT)
+        self.assertEqual(forecast.lon, DOWNTOWN_LON)
+        self.assertEqual(
+            [day.strip_line() for day in forecast.days],
+            [
+                "Mon 91/74 clear",
+                "Tue 86/70 mainly-clear",
+                "Wed 82/68 partly-cloudy",
+                "Thu 78/66 overcast",
+                "Fri 74/64 fog",
+            ],
+        )
+        block = forecast.compose_block()
+        self.assertIn("Week ahead (SD coast)", block)
+        self.assertIn("Mon 91/74 clear", block)
+
+    def test_fetch_downtown_asks_daily_not_hourly(self) -> None:
+        try:
+            import requests  # noqa: F401
+        except ImportError:
+            self.skipTest("requests not installed")
+
+        payload = {
+            "daily": {
+                "time": ["2026-09-11", "2026-09-12", "2026-09-13"],
+                "temperature_2m_max": [76, 74, 75],
+                "temperature_2m_min": [66, 64, 65],
+                "weather_code": [45, 0, 0],
+            }
+        }
+
+        class _Resp:
+            status_code = 200
+
+            def json(self) -> dict:
+                return payload
+
+        with patch("requests.get", return_value=_Resp()) as get:
+            forecast = fetch_downtown_x_forecast(
+                when=datetime(2026, 9, 11, 6, 30, tzinfo=TZ)
+            )
+        self.assertTrue(forecast.ok)
+        params = get.call_args.kwargs.get("params") or get.call_args[1]
+        self.assertEqual(params["latitude"], DOWNTOWN_LAT)
+        self.assertEqual(params["longitude"], DOWNTOWN_LON)
+        self.assertEqual(DOWNTOWN_LAT, 32.7157)
+        self.assertEqual(DOWNTOWN_LON, -117.1611)
+        self.assertNotIn("hourly", params)
+        self.assertIn("weather_code", params["daily"])
+        self.assertEqual(params["start_date"], "2026-09-11")
+        self.assertEqual(params["end_date"], "2026-09-13")
+        self.assertEqual(forecast.kind, "weekend")
+        self.assertEqual(forecast.days[0].strip_line(), "Fri 76/66 fog")
+        self.assertIn("Weekend (SD coast)", forecast.compose_block())
+
+    def test_fetch_morning_weather_keeps_locations_apart(self) -> None:
+        inland_payload = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        downtown_payload = {
+            "daily": {
+                "time": [
+                    "2026-09-07",
+                    "2026-09-08",
+                    "2026-09-09",
+                    "2026-09-10",
+                    "2026-09-11",
+                ],
+                "temperature_2m_max": [70, 70, 70, 70, 70],
+                "temperature_2m_min": [60, 60, 60, 60, 60],
+                "weather_code": [0, 0, 0, 0, 0],
+            }
+        }
+        calls: list[dict] = []
+
+        class _Resp:
+            status_code = 200
+
+            def __init__(self, data: dict) -> None:
+                self._data = data
+
+            def json(self) -> dict:
+                return self._data
+
+        def _get(url: str, params=None, timeout=None):  # noqa: ANN001
+            calls.append(params or {})
+            lat = (params or {}).get("latitude")
+            if lat == INLAND_HOME_LAT:
+                return _Resp(inland_payload)
+            return _Resp(downtown_payload)
+
+        with patch("requests.get", side_effect=_get):
+            inland, downtown = fetch_morning_weather(
+                when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+            )
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0]["latitude"], INLAND_HOME_LAT)
+        self.assertEqual(calls[1]["latitude"], DOWNTOWN_LAT)
+        self.assertTrue(inland.ok)
+        self.assertTrue(downtown.ok)
+        self.assertEqual(inland.use, "toast")
+        self.assertEqual(downtown.use, "x_forecast")
+        self.assertEqual(inland.high_f, 95)
+        self.assertEqual(inland.notion_line(), "San Diego: high 95°F / low 74°F, clear")
+        self.assertEqual(downtown.days[0].high_f, 70)
+
+    def test_fetch_san_diego_weather_is_inland_alias(self) -> None:
+        self.assertIs(fetch_san_diego_weather, fetch_inland_home_weather)
 
 
 class DateAndDryRunTests(unittest.TestCase):
@@ -1194,6 +1365,10 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("Open-Meteo", report)
         self.assertIn("inland home 92128", report)
         self.assertIn(WEATHER_LOCATION, report)
+        self.assertIn("toast / drawer / Notion", report)
+        self.assertIn("## X forecast (downtown / coast)", report)
+        self.assertIn(DOWNTOWN_LOCATION, report)
+        self.assertIn("X caption only", report)
         self.assertIn("Poetess Ann", report)
         self.assertIn("Sensual-cosmic lyric", report)
         self.assertIn("## Voice mode", report)
@@ -1263,8 +1438,8 @@ class DateAndDryRunTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             with patch(
-                "scripts.haiku_toast.runner.fetch_san_diego_weather",
-                return_value=seed,
+                "scripts.haiku_toast.runner.fetch_morning_weather",
+                return_value=_morning_pair(seed),
             ):
                 rc = run(
                     [
@@ -1282,6 +1457,9 @@ class DateAndDryRunTests(unittest.TestCase):
             self.assertIn("CLEAR HOT", report)
             self.assertIn("mode `sun_ode`", report)
             self.assertIn("## Weather drawer", report)
+            self.assertIn("toast / drawer / Notion", report)
+            self.assertIn("## X forecast (downtown / coast)", report)
+            self.assertIn("does not seed the haiku", report.lower())
             self.assertIn("morning hourly", report)
             self.assertIn("not used for the drawer or chili", report)
             self.assertIn("heat 0–1", report)
