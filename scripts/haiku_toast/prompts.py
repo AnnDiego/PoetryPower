@@ -19,6 +19,13 @@ __all__ = [
     "KEEPER_SAMPLE_HAIKU",
     "WEATHER_SOURCE",
     "WEATHER_SOURCE_URL",
+    "WEATHER_LOCATION",
+    "INLAND_HOME_LAT",
+    "INLAND_HOME_LON",
+    "INLAND_HOME_LOCATION",
+    "DOWNTOWN_LAT",
+    "DOWNTOWN_LON",
+    "DOWNTOWN_LOCATION",
     "SAN_DIEGO_LAT",
     "SAN_DIEGO_LON",
     "SAN_DIEGO_TZ",
@@ -48,11 +55,24 @@ KEEPER_SAMPLE_HAIKU = (
     "syllables of gold"
 )
 
-# Open-Meteo, downtown San Diego. Documented in weather.py + reports.
+# Two Open-Meteo points, one timezone. Do not mix them.
+# Inland home (zip 92128 / Rancho Bernardo): toast drawer, haiku seed,
+# moon helpers, Notion same-day weather line. Nominatim OSM postcode
+# centroid — not downtown — so mornings aren't marine-layer gray.
+# Downtown / coast (32.7157, -117.1611): Morning Toast → X forecast
+# captions only (Mon–Fri or Fri–Su strip). Never seeds the scrap.
 WEATHER_SOURCE = "Open-Meteo"
 WEATHER_SOURCE_URL = "https://open-meteo.com/"
-SAN_DIEGO_LAT = 32.7157
-SAN_DIEGO_LON = -117.1611
+INLAND_HOME_LAT = 32.9910
+INLAND_HOME_LON = -117.0713
+INLAND_HOME_LOCATION = "inland home zip 92128 (Rancho Bernardo)"
+DOWNTOWN_LAT = 32.7157
+DOWNTOWN_LON = -117.1611
+DOWNTOWN_LOCATION = "downtown San Diego (coast)"
+# Back-compat aliases for the toast/home point (not downtown).
+WEATHER_LOCATION = INLAND_HOME_LOCATION
+SAN_DIEGO_LAT = INLAND_HOME_LAT
+SAN_DIEGO_LON = INLAND_HOME_LON
 SAN_DIEGO_TZ = "America/Los_Angeles"
 
 # Food-photography still (not the visualizer's 9:16 vertical).
