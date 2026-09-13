@@ -362,11 +362,9 @@ def render_report(result: RunResult) -> str:
             f"- **Location:** {x_forecast.location} (`{x_forecast.lat}`, `{x_forecast.lon}`)",
             f"- **Window:** {x_forecast.kind} (`forecast_days={x_forecast.forecast_days}`)",
             "- **Strip:**",
-            "",
-            "```",
-            x_forecast.compose_block(),
-            "```",
         ]
+        for strip_line in x_forecast.compose_block().splitlines():
+            lines.append(f"  {strip_line}")
     lines += [
         "",
         "## Syllables (optional heuristic)",
