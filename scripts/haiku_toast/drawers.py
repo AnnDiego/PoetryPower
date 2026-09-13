@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .prompts import SAN_DIEGO_LAT, SAN_DIEGO_LON
+from .prompts import INLAND_HOME_LAT, INLAND_HOME_LON
 from .weather import WeatherSeed
 
 DRAWER_RAIN = "RAIN"
@@ -814,10 +814,10 @@ def _julian_date(utc: datetime) -> float:
 
 def moon_altitude_deg(
     when: datetime,
-    lat: float = SAN_DIEGO_LAT,
-    lon: float = SAN_DIEGO_LON,
+    lat: float = INLAND_HOME_LAT,
+    lon: float = INLAND_HOME_LON,
 ) -> float:
-    """Approximate geocentric moon altitude. Good enough for 'is it up?'."""
+    """Approximate geocentric moon altitude at inland home (zip 92128)."""
     utc = when.astimezone(timezone.utc) if when.tzinfo else when.replace(
         tzinfo=timezone.utc
     )
