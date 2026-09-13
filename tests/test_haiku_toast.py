@@ -13,8 +13,12 @@ from zoneinfo import ZoneInfo
 
 from scripts.haiku_toast.prompts import (
     KEEPER_SAMPLE_HAIKU,
+    SAN_DIEGO_LAT,
+    SAN_DIEGO_LON,
+    SAN_DIEGO_TZ,
     VOICE_BRIEF,
     VOICE_SEED_PATH,
+    WEATHER_LOCATION,
     writer_user_prompt,
 )
 from scripts.haiku_toast.runner import (
@@ -1125,6 +1129,13 @@ class WeatherParseTests(unittest.TestCase):
             )
         self.assertTrue(seed.ok)
         params = get.call_args.kwargs.get("params") or get.call_args[1]
+        self.assertEqual(params["latitude"], SAN_DIEGO_LAT)
+        self.assertEqual(params["longitude"], SAN_DIEGO_LON)
+        self.assertEqual(params["timezone"], SAN_DIEGO_TZ)
+        self.assertEqual(SAN_DIEGO_LAT, 32.9910)
+        self.assertEqual(SAN_DIEGO_LON, -117.0713)
+        self.assertEqual(SAN_DIEGO_TZ, "America/Los_Angeles")
+        self.assertIn("92128", WEATHER_LOCATION)
         hourly = params["hourly"]
         daily = params["daily"]
         for field in (
@@ -1181,6 +1192,8 @@ class DateAndDryRunTests(unittest.TestCase):
         self.assertIn("melting butter", report)
         self.assertIn(KEEPER_SAMPLE_HAIKU, report)
         self.assertIn("Open-Meteo", report)
+        self.assertIn("inland home 92128", report)
+        self.assertIn(WEATHER_LOCATION, report)
         self.assertIn("Poetess Ann", report)
         self.assertIn("Sensual-cosmic lyric", report)
         self.assertIn("## Voice mode", report)

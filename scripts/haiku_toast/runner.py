@@ -14,7 +14,7 @@ Run from repo root:
     python -m scripts.haiku_toast.runner
 
 Flow:
-  San Diego date + morning hourly Open-Meteo
+  San Diego date + inland-home (92128) morning hourly Open-Meteo
   → Ann weather drawer (or --mode)
   → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
@@ -55,6 +55,7 @@ from .prompts import (
     KEEPER_SAMPLE_HAIKU,
     SAN_DIEGO_TZ,
     VOICE_BRIEF,
+    WEATHER_LOCATION,
 )
 from .style_catalog import (
     ToastStyle,
@@ -297,7 +298,7 @@ def render_report(result: RunResult) -> str:
     lines = [
         f"# Daily Haiku Toast — {result.date_line}",
         "",
-        f"_San Diego · {result.weekday} · style `{style_name}` · mode `{mode_name}` · drawer `{drawer_name}`_",
+        f"_inland home 92128 · {result.weekday} · style `{style_name}` · mode `{mode_name}` · drawer `{drawer_name}`_",
         "",
         "## Style",
         "",
@@ -334,6 +335,7 @@ def render_report(result: RunResult) -> str:
         "## Date & weather",
         "",
         f"- **Date:** {result.date_line} (`{SAN_DIEGO_TZ}`)",
+        f"- **Location:** {WEATHER_LOCATION}",
         f"- **Weekday vibe:** {weekday_vibe(result.weekday)}",
         f"- **Hourly:** {weather.hourly_report_line()}",
         f"- **Daily:** {weather.daily_context_line()}",
@@ -611,7 +613,7 @@ def run(argv: Optional[List[str]] = None) -> int:
         weather = WeatherSeed(ok=False, error="--no-weather")
         print("Weather fetch skipped (--no-weather).")
     else:
-        print("Fetching San Diego morning hourly from Open-Meteo…")
+        print(f"Fetching {WEATHER_LOCATION} morning hourly from Open-Meteo…")
         weather = fetch_san_diego_weather(when=when)
         print(f"  {weather.seed_line()}")
 
