@@ -1,5 +1,8 @@
 """
-San Diego morning weather snapshot for Daily Haiku Toast.
+Morning weather snapshot for Daily Haiku Toast.
+
+Pulled for Ann's inland home zip 92128 (Rancho Bernardo), not
+downtown / coastal San Diego — see SAN_DIEGO_LAT / SAN_DIEGO_LON.
 
 Source: Open-Meteo free forecast API (no key).
   https://open-meteo.com/
@@ -308,7 +311,7 @@ def fetch_san_diego_weather(
     when: Optional[datetime] = None,
     timeout: float = 12.0,
 ) -> WeatherSeed:
-    """GET San Diego hourly + sunrise. Never raises."""
+    """GET inland-home (zip 92128) hourly + sunrise. Never raises."""
     try:
         import requests
     except ImportError:

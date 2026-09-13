@@ -19,6 +19,7 @@ __all__ = [
     "KEEPER_SAMPLE_HAIKU",
     "WEATHER_SOURCE",
     "WEATHER_SOURCE_URL",
+    "WEATHER_LOCATION",
     "SAN_DIEGO_LAT",
     "SAN_DIEGO_LON",
     "SAN_DIEGO_TZ",
@@ -48,11 +49,15 @@ KEEPER_SAMPLE_HAIKU = (
     "syllables of gold"
 )
 
-# Open-Meteo, downtown San Diego. Documented in weather.py + reports.
+# Open-Meteo at Ann's inland home zip 92128 (Rancho Bernardo / inland
+# San Diego County). Nominatim OSM postcode centroid, not downtown
+# or coastal bayfront — so morning pulls aren't marine-layer gray.
+# Documented in weather.py + reports. TZ stays America/Los_Angeles.
 WEATHER_SOURCE = "Open-Meteo"
 WEATHER_SOURCE_URL = "https://open-meteo.com/"
-SAN_DIEGO_LAT = 32.7157
-SAN_DIEGO_LON = -117.1611
+WEATHER_LOCATION = "inland home zip 92128 (Rancho Bernardo)"
+SAN_DIEGO_LAT = 32.9910
+SAN_DIEGO_LON = -117.0713
 SAN_DIEGO_TZ = "America/Los_Angeles"
 
 # Food-photography still (not the visualizer's 9:16 vertical).

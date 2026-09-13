@@ -817,7 +817,7 @@ def moon_altitude_deg(
     lat: float = SAN_DIEGO_LAT,
     lon: float = SAN_DIEGO_LON,
 ) -> float:
-    """Approximate geocentric moon altitude. Good enough for 'is it up?'."""
+    """Approximate geocentric moon altitude at the weather lat/lon (zip 92128)."""
     utc = when.astimezone(timezone.utc) if when.tzinfo else when.replace(
         tzinfo=timezone.utc
     )
