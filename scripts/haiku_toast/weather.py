@@ -11,6 +11,11 @@ Source: Open-Meteo free forecast API (no key).
   https://open-meteo.com/
   https://api.open-meteo.com/v1/forecast
 
+Last-good JSON is cached on disk near this module (~8h TTL). Inland
+and downtown keys stay apart (coords + date / forecast window). One
+GET attempt only — never retry. HTTP 429 uses stale cache when
+present; otherwise soft-fails (ok=False). Never raises.
+
 Toast path pulls hourly fields at the run hour (live ~6:15–6:45am PDT)
 plus daily sunrise. Drawer selection uses sky + moisture + light at
 that hour — not the daily high, and never temperature to raise chili.
@@ -21,8 +26,11 @@ was unavailable.
 
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -39,6 +47,9 @@ from .prompts import (
 )
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+# Last-good JSON per request (inland vs downtown + forecast window).
+CACHE_DIR = Path(__file__).resolve().parent / ".open_meteo_cache"
+CACHE_TTL = timedelta(hours=8)
 
 HOURLY_FIELDS = (
     "weather_code",
@@ -171,6 +182,7 @@ class WeatherSeed:
     location: str = INLAND_HOME_LOCATION
     use: str = USE_TOAST
     error: Optional[str] = None
+    from_cache: bool = False
 
     def seed_line(self) -> str:
         if not self.ok:
@@ -206,10 +218,13 @@ class WeatherSeed:
             else "?"
         )
         code = self.weather_code if self.weather_code is not None else "?"
-        return (
+        line = (
             f"{hour} PT hourly · code {code} {self.condition} · {temp} · "
             f"cloud {cloud} · vis {vis} · RH {rh} · precip {precip}"
         )
+        if self.from_cache:
+            line += " · from cache"
+        return line
 
     def hourly_report_line(self) -> str:
         if not self.ok:
@@ -367,6 +382,7 @@ class DowntownForecast:
     source_url: str = WEATHER_SOURCE_URL
     use: str = USE_X_FORECAST
     error: Optional[str] = None
+    from_cache: bool = False
 
     def heading(self) -> str:
         if self.kind == "weekend":
@@ -384,7 +400,10 @@ class DowntownForecast:
                 + (f" ({self.error})" if self.error else "")
             )
         body = self.strip_text()
-        return f"{self.heading()}:\n{body}" if body else self.heading()
+        heading = self.heading()
+        if self.from_cache:
+            heading = f"{heading} (cached)"
+        return f"{heading}:\n{body}" if body else heading
 
 
 def x_forecast_window(when: datetime) -> Tuple[date, int, str]:
@@ -455,28 +474,144 @@ def parse_downtown_daily(
     )
 
 
+def _cache_key(params: Dict[str, Any]) -> str:
+    """Stable filename: inland vs downtown + date / forecast window."""
+    lat = params.get("latitude", "lat")
+    lon = params.get("longitude", "lon")
+    try:
+        lat_s = f"{float(lat):.4f}"
+    except (TypeError, ValueError):
+        lat_s = str(lat)
+    try:
+        lon_s = f"{float(lon):.4f}"
+    except (TypeError, ValueError):
+        lon_s = str(lon)
+    start = str(params.get("start_date") or "")
+    end = str(params.get("end_date") or "")
+    kind = "hourly" if params.get("hourly") else "daily"
+    return f"{kind}_{start}_{end}_{lat_s}_{lon_s}"
+
+
+def _cache_path(params: Dict[str, Any], cache_dir: Optional[Path] = None) -> Path:
+    return (cache_dir or CACHE_DIR) / f"{_cache_key(params)}.json"
+
+
+def _parse_fetched_at(value: Any) -> Optional[datetime]:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _cache_is_fresh(fetched_at: Optional[datetime]) -> bool:
+    if fetched_at is None:
+        return False
+    age = datetime.now(timezone.utc) - fetched_at
+    return age <= CACHE_TTL
+
+
+def _read_open_meteo_cache(
+    params: Dict[str, Any],
+    *,
+    cache_dir: Optional[Path] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[datetime]]:
+    path = _cache_path(params, cache_dir)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — missing/corrupt cache is a miss
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None, None
+    return data, _parse_fetched_at(payload.get("fetched_at"))
+
+
+def _write_open_meteo_cache(
+    params: Dict[str, Any],
+    data: Dict[str, Any],
+    *,
+    cache_dir: Optional[Path] = None,
+    fetched_at: Optional[datetime] = None,
+) -> None:
+    path = _cache_path(params, cache_dir)
+    when = fetched_at or datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    payload = {
+        "fetched_at": when.astimezone(timezone.utc).isoformat(),
+        "params": params,
+        "data": data,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(path)
+    except Exception:  # noqa: BLE001 — live seed still wins if disk fails
+        return
+
+
+def _rate_limit_error(status: int = 429) -> str:
+    return (
+        f"Open-Meteo HTTP {status} rate limit — do not retry"
+    )
+
+
 def _open_meteo_json(
     params: Dict[str, Any],
     *,
     timeout: float,
-) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    cache_dir: Optional[Path] = None,
+) -> Tuple[Optional[Dict[str, Any]], Optional[str], bool]:
+    """
+    One GET. Fresh cache (~8h) skips the network. HTTP 429 never retries:
+    stale cache if present, else a soft error. Never raises.
+    """
+    cached, fetched_at = _read_open_meteo_cache(params, cache_dir=cache_dir)
+    if cached is not None and _cache_is_fresh(fetched_at):
+        print(
+            f"Open-Meteo cache hit for {_cache_key(params)} (no network).",
+            file=sys.stderr,
+        )
+        return cached, None, True
+
     try:
         import requests
     except ImportError:
-        return None, "requests not installed"
+        return None, "requests not installed", False
     try:
         resp = requests.get(OPEN_METEO_URL, params=params, timeout=timeout)
     except Exception as exc:  # noqa: BLE001 — seed; any failure is a skip
-        return None, str(exc)
-    if resp.status_code >= 400:
-        return None, f"Open-Meteo HTTP {resp.status_code}"
+        return None, str(exc), False
+
+    status = resp.status_code
+    if status == 429:
+        if cached is not None:
+            print(
+                f"Open-Meteo HTTP 429; using cached forecast for "
+                f"{_cache_key(params)} (fetched {fetched_at}, may be stale). "
+                "Do not retry.",
+                file=sys.stderr,
+            )
+            return cached, None, True
+        return None, _rate_limit_error(status), False
+    if status >= 400:
+        return None, f"Open-Meteo HTTP {status}", False
     try:
         data = resp.json()
     except Exception as exc:  # noqa: BLE001
-        return None, f"Open-Meteo JSON: {exc}"
+        return None, f"Open-Meteo JSON: {exc}", False
     if not isinstance(data, dict):
-        return None, "Open-Meteo returned a non-object"
-    return data, None
+        return None, "Open-Meteo returned a non-object", False
+    _write_open_meteo_cache(params, data, cache_dir=cache_dir)
+    return data, None, False
 
 
 def fetch_inland_home_weather(
@@ -497,7 +632,7 @@ def fetch_inland_home_weather(
         "start_date": day,
         "end_date": day,
     }
-    data, error = _open_meteo_json(params, timeout=timeout)
+    data, error, from_cache = _open_meteo_json(params, timeout=timeout)
     if error:
         return WeatherSeed(
             ok=False,
@@ -506,7 +641,9 @@ def fetch_inland_home_weather(
             use=USE_TOAST,
         )
     assert data is not None
-    return parse_open_meteo(data, when=pull)
+    seed = parse_open_meteo(data, when=pull)
+    seed.from_cache = from_cache
+    return seed
 
 
 # Back-compat name: toast/inland path only, never downtown.
@@ -531,7 +668,7 @@ def fetch_downtown_x_forecast(
         "start_date": start.isoformat(),
         "end_date": end.isoformat(),
     }
-    data, error = _open_meteo_json(params, timeout=timeout)
+    data, error, from_cache = _open_meteo_json(params, timeout=timeout)
     if error:
         return DowntownForecast(
             ok=False,
@@ -541,9 +678,11 @@ def fetch_downtown_x_forecast(
             error=error,
         )
     assert data is not None
-    return parse_downtown_daily(
+    forecast = parse_downtown_daily(
         data, kind=kind, forecast_days=forecast_days
     )
+    forecast.from_cache = from_cache
+    return forecast
 
 
 def skipped_morning_weather(

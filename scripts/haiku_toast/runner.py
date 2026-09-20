@@ -15,7 +15,8 @@ Run from repo root:
 
 Flow:
   San Diego date + inland-home (92128) morning hourly Open-Meteo
-  (+ downtown coast strip for Morning Toast → X captions only)
+  (disk cache + 429 last-good fallback; downtown coast strip for
+  Morning Toast → X captions only)
   → Ann weather drawer (or --mode)
   → one short three-line haiku (xAI chat, or dry sample if no key)
   → pick an enabled Imagine style (random, or --style / --seed)
@@ -350,7 +351,8 @@ def render_report(result: RunResult) -> str:
         f"- **Hourly:** {weather.hourly_report_line()}",
         f"- **Daily:** {weather.daily_context_line()}",
         f"- **Notion:** {weather.notion_line()}",
-        f"- **Source:** {weather.source} ({weather.source_url}) — hourly at pull hour + daily sunrise. Not a weather product.",
+        f"- **Source:** {weather.source} ({weather.source_url}) — hourly at pull hour + daily sunrise. Not a weather product."
+        + (" Cached last-good used (TTL or HTTP 429)." if weather.from_cache else ""),
     ]
     x_forecast = result.x_forecast
     if x_forecast is not None:
@@ -361,6 +363,12 @@ def render_report(result: RunResult) -> str:
             "- **Use:** Morning Toast → X caption only. Does not seed the haiku, drawer, Imagine, or Notion weather line.",
             f"- **Location:** {x_forecast.location} (`{x_forecast.lat}`, `{x_forecast.lon}`)",
             f"- **Window:** {x_forecast.kind} (`forecast_days={x_forecast.forecast_days}`)",
+        ]
+        if x_forecast.from_cache:
+            lines.append(
+                "- **Cache:** last-good Open-Meteo JSON (TTL or HTTP 429)."
+            )
+        lines += [
             "- **Strip:**",
         ]
         for strip_line in x_forecast.compose_block().splitlines():
