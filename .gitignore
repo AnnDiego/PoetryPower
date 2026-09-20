@@ -217,4 +217,5 @@ scripts/private/
 /toasts/*.png
 /toasts/*.webp
 /toasts/.last_drawer.json
+scripts/haiku_toast/.open_meteo_cache/
 

@@ -6,7 +6,7 @@ import json
 import random
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -88,8 +88,12 @@ from scripts.haiku_toast.voice_modes import (
     mode_for_drawer,
 )
 from scripts.haiku_toast.weather import (
+    DAILY_FIELDS,
     DowntownForecast,
+    HOURLY_FIELDS,
     WeatherSeed,
+    _cache_key,
+    _write_open_meteo_cache,
     fetch_downtown_x_forecast,
     fetch_inland_home_weather,
     fetch_morning_weather,
@@ -1097,6 +1101,18 @@ class AntiRepetitionTests(unittest.TestCase):
 
 
 class WeatherParseTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._cache_tmp = tempfile.TemporaryDirectory()
+        self._cache_patch = patch(
+            "scripts.haiku_toast.weather.CACHE_DIR",
+            Path(self._cache_tmp.name),
+        )
+        self._cache_patch.start()
+
+    def tearDown(self) -> None:
+        self._cache_patch.stop()
+        self._cache_tmp.cleanup()
+
     def test_parse_open_meteo_hourly(self) -> None:
         data = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
         seed = parse_open_meteo(
@@ -1322,6 +1338,156 @@ class WeatherParseTests(unittest.TestCase):
 
     def test_fetch_san_diego_weather_is_inland_alias(self) -> None:
         self.assertIs(fetch_san_diego_weather, fetch_inland_home_weather)
+
+    def test_open_meteo_cache_keys_keep_inland_and_downtown_apart(self) -> None:
+        inland = {
+            "latitude": INLAND_HOME_LAT,
+            "longitude": INLAND_HOME_LON,
+            "hourly": "weather_code",
+            "start_date": "2026-09-09",
+            "end_date": "2026-09-09",
+        }
+        downtown = {
+            "latitude": DOWNTOWN_LAT,
+            "longitude": DOWNTOWN_LON,
+            "daily": "weather_code",
+            "start_date": "2026-09-07",
+            "end_date": "2026-09-11",
+        }
+        self.assertNotEqual(_cache_key(inland), _cache_key(downtown))
+        self.assertIn("hourly", _cache_key(inland))
+        self.assertIn("daily", _cache_key(downtown))
+        self.assertIn("2026-09-09", _cache_key(inland))
+        self.assertIn("2026-09-07", _cache_key(downtown))
+
+    def test_open_meteo_fresh_cache_skips_network(self) -> None:
+        try:
+            import requests  # noqa: F401
+        except ImportError:
+            self.skipTest("requests not installed")
+
+        payload = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+
+        class _Resp:
+            status_code = 200
+
+            def json(self) -> dict:
+                return payload
+
+        when = datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        with patch("requests.get", return_value=_Resp()) as first:
+            seed = fetch_inland_home_weather(when=when)
+        self.assertTrue(seed.ok)
+        self.assertFalse(seed.from_cache)
+        self.assertEqual(first.call_count, 1)
+
+        def _no_network(*_args, **_kwargs):  # noqa: ANN001
+            raise AssertionError("fresh cache must not call Open-Meteo")
+
+        with patch("requests.get", side_effect=_no_network) as second:
+            cached = fetch_inland_home_weather(when=when)
+        self.assertEqual(second.call_count, 0)
+        self.assertTrue(cached.ok)
+        self.assertTrue(cached.from_cache)
+        self.assertEqual(cached.temperature_2m, seed.temperature_2m)
+        self.assertIn("from cache", cached.seed_line())
+
+    def test_open_meteo_429_uses_stale_cache(self) -> None:
+        try:
+            import requests  # noqa: F401
+        except ImportError:
+            self.skipTest("requests not installed")
+
+        payload = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        when = datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+        day = when.date().isoformat()
+        params = {
+            "latitude": INLAND_HOME_LAT,
+            "longitude": INLAND_HOME_LON,
+            "hourly": ",".join(HOURLY_FIELDS),
+            "daily": ",".join(DAILY_FIELDS),
+            "temperature_unit": "fahrenheit",
+            "timezone": SAN_DIEGO_TZ,
+            "start_date": day,
+            "end_date": day,
+        }
+        _write_open_meteo_cache(
+            params,
+            payload,
+            fetched_at=datetime.now(timezone.utc) - timedelta(hours=9),
+        )
+
+        class _Resp:
+            status_code = 429
+
+            def json(self) -> dict:
+                raise AssertionError("429 body should not be parsed")
+
+        with patch("requests.get", return_value=_Resp()) as get:
+            seed = fetch_inland_home_weather(when=when)
+        self.assertEqual(get.call_count, 1)
+        self.assertTrue(seed.ok)
+        self.assertTrue(seed.from_cache)
+        self.assertEqual(seed.condition, "clear")
+        self.assertIn("from cache", seed.seed_line())
+
+    def test_open_meteo_429_without_cache_is_soft_fail(self) -> None:
+        try:
+            import requests  # noqa: F401
+        except ImportError:
+            self.skipTest("requests not installed")
+
+        class _Resp:
+            status_code = 429
+
+            def json(self) -> dict:
+                raise AssertionError("429 body should not be parsed")
+
+        with patch("requests.get", return_value=_Resp()) as get:
+            seed = fetch_inland_home_weather(
+                when=datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+            )
+        self.assertEqual(get.call_count, 1)
+        self.assertFalse(seed.ok)
+        self.assertFalse(seed.from_cache)
+        error = seed.error or ""
+        self.assertIn("429", error)
+        self.assertIn("rate limit", error.lower())
+        self.assertIn("do not retry", error.lower())
+        self.assertIn("unavailable", seed.seed_line())
+
+    def test_open_meteo_429_does_not_reuse_other_location_cache(self) -> None:
+        try:
+            import requests  # noqa: F401
+        except ImportError:
+            self.skipTest("requests not installed")
+
+        inland_payload = json.loads(FIXTURE_20260909.read_text(encoding="utf-8"))
+        when = datetime(2026, 9, 9, 6, 30, tzinfo=TZ)
+
+        class _Ok:
+            status_code = 200
+
+            def json(self) -> dict:
+                return inland_payload
+
+        with patch("requests.get", return_value=_Ok()):
+            inland = fetch_inland_home_weather(when=when)
+        self.assertTrue(inland.ok)
+
+        class _429:
+            status_code = 429
+
+            def json(self) -> dict:
+                raise AssertionError("429 body should not be parsed")
+
+        with patch("requests.get", return_value=_429()) as get:
+            downtown = fetch_downtown_x_forecast(when=when)
+        self.assertEqual(get.call_count, 1)
+        self.assertFalse(downtown.ok)
+        self.assertFalse(downtown.from_cache)
+        self.assertIn("429", downtown.error or "")
+        self.assertIn("do not retry", (downtown.error or "").lower())
 
 
 class DateAndDryRunTests(unittest.TestCase):
