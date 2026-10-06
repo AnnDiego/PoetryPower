@@ -219,3 +219,8 @@ scripts/private/
 /toasts/.last_drawer.json
 scripts/haiku_toast/.open_meteo_cache/
 
+# Private poems and visualizer markdown. The README stays tracked so
+# poems/ still exists after clone (root detection and local output).
+/poems/*
+!/poems/README.md
+
